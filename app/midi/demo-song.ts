@@ -15,7 +15,7 @@ interface AbsoluteEvent {
 }
 
 function toDeltaTrack(events: AbsoluteEvent[], endTick: number): AnyEvent[] {
-  const sorted = [...events].sort((a, b) => a.tick - b.tick);
+  const sorted = events.slice().sort((a, b) => a.tick - b.tick);
   const result: AnyEvent[] = [];
   let previous = 0;
 

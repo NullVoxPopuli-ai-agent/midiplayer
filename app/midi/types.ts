@@ -23,7 +23,11 @@ export interface NoteEvent {
   duration: number;
 }
 
-export type TrackEvent = NoteEvent | RawTrackEvent;
+/** an event as constructed, before a Track assigns it an id */
+export type TrackEventBody = NoteEvent | RawTrackEvent;
+
+/** an event stored in a Track: body + per-track unique id (for editing) */
+export type TrackEvent = TrackEventBody & { id: number };
 
 /**
  * An event as flattened for playback: absolute tick + owning track.

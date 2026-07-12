@@ -1,4 +1,4 @@
-import type { NoteEvent, RawTrackEvent, TrackEvent } from "./types.ts";
+import type { NoteEvent, RawTrackEvent, TrackEventBody } from "./types.ts";
 
 type TickedNoteOn = RawTrackEvent & { type: "channel"; subtype: "noteOn" };
 
@@ -17,9 +17,9 @@ function isNoteOff(e: RawTrackEvent): e is RawTrackEvent & { type: "channel"; su
  * dropped. (midifile-ts already normalizes vel-0 noteOns to noteOffs
  * at parse time.)
  */
-export function assembleNotes(events: readonly RawTrackEvent[]): TrackEvent[] {
+export function assembleNotes(events: readonly RawTrackEvent[]): TrackEventBody[] {
   const pending: TickedNoteOn[] = [];
-  const result: TrackEvent[] = [];
+  const result: TrackEventBody[] = [];
 
   for (const event of events) {
     if (isNoteOn(event)) {
@@ -53,7 +53,7 @@ export function assembleNotes(events: readonly RawTrackEvent[]): TrackEvent[] {
   return result;
 }
 
-export function isNoteEvent(e: TrackEvent): e is NoteEvent {
+export function isNoteEvent<T extends TrackEventBody>(e: T): e is T & NoteEvent {
   return e.type === "channel" && e.subtype === "note";
 }
 

@@ -5,6 +5,7 @@ import { service } from "@ember/service";
 import { getMBTString } from "#app/midi/measure.ts";
 import { SYNTH_OUTPUT_ID } from "#services/player.ts";
 
+import type EditorService from "#services/editor.ts";
 import type PlayerService from "#services/player.ts";
 
 function formatTime(totalSeconds: number): string {
@@ -19,9 +20,14 @@ function eq(a: string, b: string): boolean {
 
 export class Transport extends Component {
   @service declare player: PlayerService;
+  @service declare editor: EditorService;
 
   playPause = (): void => {
     this.player.player?.playOrPause();
+  };
+
+  toggleRecording = (): void => {
+    void this.editor.toggleRecording();
   };
 
   stop = (): void => {
@@ -152,7 +158,20 @@ export class Transport extends Component {
         >
           🜛
         </button>
+        <button
+          type="button"
+          class="preem__button transport__toggle transport__record"
+          aria-pressed="{{this.editor.isRecording}}"
+          aria-label="Record from MIDI input onto the edited track"
+          {{on "click" this.toggleRecording}}
+        >
+          ●
+        </button>
       </div>
+
+      {{#if this.editor.recordingStatus}}
+        <span class="transport__rec-status" role="status">{{this.editor.recordingStatus}}</span>
+      {{/if}}
 
       <output class="transport__mbt" aria-label="Position (measure:beat:tick)">
         {{this.mbt}}

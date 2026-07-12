@@ -104,13 +104,12 @@ export class EventScheduler<E extends SchedulableEvent> {
       this._currentTick = currentTick;
       this._scheduledTick = wrappedEnd;
 
-      return [
-        ...getEventsInRange(startTick, loop.end, nowTick),
-        ...this.createLoopEndEvents().map((event) =>
+      return getEventsInRange(startTick, loop.end, nowTick).concat(
+        this.createLoopEndEvents().map((event) =>
           withTimestamp(currentTick)({ ...event, tick: loop.begin } as E),
         ),
-        ...getEventsInRange(loop.begin, wrappedEnd, currentTick),
-      ];
+        getEventsInRange(loop.begin, wrappedEnd, currentTick),
+      );
     }
 
     this._currentTick = nowTick;

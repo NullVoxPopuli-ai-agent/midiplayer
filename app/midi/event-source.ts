@@ -51,7 +51,7 @@ export class PlayerEventSource implements IEventSource {
       },
     );
 
-    return [...events, ...clicks];
+    return events.concat(clicks);
   }
 
   getCurrentStateEvents(tick: number): SendableEvent[] {

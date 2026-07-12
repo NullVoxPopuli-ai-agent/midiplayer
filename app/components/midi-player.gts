@@ -6,10 +6,13 @@ import { service } from "@ember/service";
 import { modifier } from "ember-modifier";
 import { Button } from "nvp.ui";
 
+import { ArrangeView } from "./arrange-view.gts";
 import { PianoRoll } from "./piano-roll.gts";
 import { TrackList } from "./track-list.gts";
 import { Transport } from "./transport.gts";
 
+import type EditorService from "#services/editor.ts";
+import type HistoryService from "#services/history.ts";
 import type PlayerService from "#services/player.ts";
 
 function isMidiFile(file: File): boolean {
@@ -22,9 +25,19 @@ function eq(a: string, b: string): boolean {
 
 export class MidiPlayer extends Component {
   @service declare player: PlayerService;
+  @service declare editor: EditorService;
+  @service declare history: HistoryService;
 
   @tracked loadError: string | null = null;
   @tracked isDragOver = false;
+
+  newSong = (): void => {
+    void this.load(this.player.newSong());
+  };
+
+  exportMidi = (): void => {
+    this.player.exportMidi();
+  };
 
   onFile = (event: Event): void => {
     const input = event.target as HTMLInputElement;
@@ -52,7 +65,7 @@ export class MidiPlayer extends Component {
    */
   globalHandlers = modifier(() => {
     const onDragOver = (event: DragEvent) => {
-      if (![...(event.dataTransfer?.types ?? [])].includes("Files")) return;
+      if (!(event.dataTransfer?.types ?? []).includes("Files")) return;
 
       event.preventDefault();
       this.isDragOver = true;
@@ -66,7 +79,7 @@ export class MidiPlayer extends Component {
       event.preventDefault();
       this.isDragOver = false;
 
-      const file = [...(event.dataTransfer?.files ?? [])].find(isMidiFile);
+      const file = Array.from(event.dataTransfer?.files ?? []).find(isMidiFile);
 
       if (file) {
         void this.load(this.player.loadFile(file));
@@ -81,12 +94,69 @@ export class MidiPlayer extends Component {
       if (["INPUT", "SELECT", "TEXTAREA", "BUTTON"].includes(target.tagName)) return;
       if (!this.player.player) return;
 
-      if (event.code === "Space") {
-        event.preventDefault();
-        this.player.player.playOrPause();
-      } else if (event.code === "Home") {
-        event.preventDefault();
-        this.player.player.position = 0;
+      const mod = event.ctrlKey || event.metaKey;
+
+      if (mod) {
+        switch (event.code) {
+          case "KeyZ":
+            event.preventDefault();
+
+            if (event.shiftKey) {
+              this.history.redo();
+            } else {
+              this.history.undo();
+            }
+
+            return;
+          case "KeyY":
+            event.preventDefault();
+            this.history.redo();
+
+            return;
+          case "KeyC":
+            event.preventDefault();
+            this.editor.copySelection();
+
+            return;
+          case "KeyX":
+            event.preventDefault();
+            this.editor.cutSelection();
+
+            return;
+          case "KeyV":
+            event.preventDefault();
+            this.editor.paste();
+
+            return;
+          case "KeyA":
+            event.preventDefault();
+            this.editor.selectAll();
+
+            return;
+          default:
+            return;
+        }
+      }
+
+      switch (event.code) {
+        case "Space":
+          event.preventDefault();
+          this.player.player.playOrPause();
+
+          break;
+        case "Home":
+          event.preventDefault();
+          this.player.player.position = 0;
+
+          break;
+        case "Delete":
+        case "Backspace":
+          event.preventDefault();
+          this.editor.deleteSelection();
+
+          break;
+        default:
+          break;
       }
     };
 
@@ -105,6 +175,8 @@ export class MidiPlayer extends Component {
 
   private async load(promise: Promise<void>): Promise<void> {
     this.loadError = null;
+    this.history.clear();
+    this.editor.clearSelection();
 
     try {
       await promise;
@@ -131,6 +203,14 @@ export class MidiPlayer extends Component {
         </label>
 
         <Button @onClick={{this.loadDemo}}>Play the demo song</Button>
+        <Button @onClick={{this.newSong}}>New song</Button>
+
+        {{#if this.player.song}}
+          <Button @onClick={{this.exportMidi}}>
+            <:start>⬇</:start>
+            <:text>Export .mid</:text>
+          </Button>
+        {{/if}}
 
         {{#if this.player.lastFile}}
           {{#unless this.player.song}}
@@ -162,6 +242,7 @@ export class MidiPlayer extends Component {
       {{#if this.player.song}}
         {{#if this.player.player}}
           <Transport />
+          <ArrangeView />
           <PianoRoll
             @song={{this.player.song}}
             @player={{this.player.player}}

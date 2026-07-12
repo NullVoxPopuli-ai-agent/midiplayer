@@ -5,7 +5,7 @@ import { createDemoSong } from "#app/midi/demo-song.ts";
 import { PlayerEventSource } from "#app/midi/event-source.ts";
 import { GroupOutput } from "#app/midi/group-output.ts";
 import { Player } from "#app/midi/player.ts";
-import { songFromMidi } from "#app/midi/song.ts";
+import { emptySong, songFromMidi, songToMidi } from "#app/midi/song.ts";
 import { TrackMute } from "#app/midi/track-mute.ts";
 import { WaveletSynth } from "#app/midi/wavelet-synth.ts";
 import { WebMidiOutput } from "#app/midi/web-midi-output.ts";
@@ -43,6 +43,7 @@ export default class PlayerService extends Service {
   /** "synth" or a Web MIDI output id */
   @tracked selectedOutputId: string = SYNTH_OUTPUT_ID;
   @tracked midiOutputs: MIDIOutput[] = [];
+  @tracked midiInputs: MIDIInput[] = [];
 
   readonly trackMute = new TrackMute();
 
@@ -81,6 +82,87 @@ export default class PlayerService extends Service {
 
   async loadDemoSong(): Promise<void> {
     await this.useSong(createDemoSong(), "Demo Song (generated)");
+  }
+
+  async newSong(): Promise<void> {
+    await this.useSong(emptySong(), "untitled.mid");
+  }
+
+  /**
+   * Swap in a restored song (undo/redo) without resetting transport or
+   * mute state.
+   */
+  restoreSong(song: Song): void {
+    const position = this.player?.position ?? 0;
+    const wasPlaying = this.player?.isPlaying ?? false;
+    const metronome = this.eventSource?.enableMetronome ?? false;
+    const loop = this.player?.loop ?? null;
+
+    this.player?.teardown();
+
+    this.song = song;
+    this.eventSource = new PlayerEventSource(song);
+    this.eventSource.enableMetronome = metronome;
+    this.player = new Player(this.groupOutput, this.eventSource);
+    this.player.loop = loop;
+    this.player.position = Math.min(position, song.endOfSong);
+
+    if (wasPlaying) this.player.play();
+
+    this.markEdited();
+  }
+
+  /** download the current song as a .mid file */
+  exportMidi(): void {
+    const song = this.song;
+
+    if (!song) return;
+
+    const bytes = songToMidi(song);
+    const blob = new Blob([bytes.slice().buffer], { type: "audio/midi" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = this.fileName ?? "song.mid";
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  private autosaveTimer: number | null = null;
+
+  /** debounce-persist the edited song so "Resume" restores edits */
+  markEdited(): void {
+    if (this.autosaveTimer !== null) clearTimeout(this.autosaveTimer);
+
+    this.autosaveTimer = window.setTimeout(() => {
+      this.autosaveTimer = null;
+
+      const song = this.song;
+
+      if (!song) return;
+
+      const data = songToMidi(song).slice().buffer;
+
+      this.lastFile = { name: this.fileName ?? "untitled.mid", data };
+      void saveLastFile(this.lastFile);
+    }, 1000);
+  }
+
+  /** send a state event (program/controller change) to the output now */
+  sendLiveEvent(event: Parameters<GroupOutput["sendEvent"]>[0]): void {
+    this.groupOutput.sendEvent(event, 0, -1);
+  }
+
+  /** short audition blip when drawing notes in the editor */
+  previewNote(channel: number, noteNumber: number): void {
+    const synth = this.mainSynth;
+
+    if (!synth) return;
+
+    synth.activate();
+    synth.sendEvent({ type: "channel", subtype: "noteOn", channel, noteNumber, velocity: 100 }, 0);
+    synth.sendEvent({ type: "channel", subtype: "noteOff", channel, noteNumber, velocity: 0 }, 0.3);
   }
 
   setVolume(value: number): void {
@@ -138,9 +220,11 @@ export default class PlayerService extends Service {
   async refreshMidiOutputs(): Promise<void> {
     try {
       this.midiAccess ??= await navigator.requestMIDIAccess();
-      this.midiOutputs = [...this.midiAccess.outputs.values()];
+      this.midiOutputs = Array.from(this.midiAccess.outputs.values());
+      this.midiInputs = Array.from(this.midiAccess.inputs.values());
     } catch {
       this.midiOutputs = [];
+      this.midiInputs = [];
     }
   }
 

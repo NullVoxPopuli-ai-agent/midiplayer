@@ -1,4 +1,6 @@
-import { read } from "midifile-ts";
+import { cached, tracked } from "@glimmer/tracking";
+
+import { read, write } from "midifile-ts";
 
 import { measuresFromTimeSignatures } from "./measure.ts";
 import { assembleNotes, deassembleNote, isNoteEvent } from "./note-assembler.ts";
@@ -12,6 +14,7 @@ import type {
   SendableEvent,
   TickedEvent,
   TrackEvent,
+  TrackEventBody,
 } from "./types.ts";
 import type { AnyEvent, SetTempoEvent, TimeSignatureEvent } from "midifile-ts";
 
@@ -32,25 +35,99 @@ function addTick(events: readonly AnyEvent[]): RawTrackEvent[] {
   });
 }
 
-function isChannelEvent(e: TrackEvent): e is TrackEvent & { channel: number } {
+function isChannelEvent(e: TrackEventBody): e is TrackEventBody & { channel: number } {
   return e.type === "channel";
 }
 
-function isSetTempo(e: TrackEvent): e is TickedEvent<SetTempoEvent> {
+function isSetTempo(e: TrackEventBody): e is TickedEvent<SetTempoEvent> {
   return e.type === "meta" && e.subtype === "setTempo";
 }
 
-function isTimeSignature(e: TrackEvent): e is TickedEvent<TimeSignatureEvent> {
+function isTimeSignature(e: TrackEventBody): e is TickedEvent<TimeSignatureEvent> {
   return e.type === "meta" && e.subtype === "timeSignature";
 }
 
+function byTick(a: { tick: number }, b: { tick: number }): number {
+  return a.tick - b.tick;
+}
+
+/**
+ * A track with editable, tick-sorted events. Every stored event gets a
+ * per-track unique id so the editor (selection, undo, updates) can
+ * refer to it.
+ */
 export class Track {
+  @tracked private _events: TrackEvent[];
+
+  private nextEventId = 0;
+
   constructor(
     readonly id: number,
     /** undefined ⇒ conductor track */
     readonly channel: number | undefined,
-    readonly events: readonly TrackEvent[],
-  ) {}
+    events: readonly TrackEventBody[] = [],
+  ) {
+    this._events = events.map((event) => ({ ...event, id: this.nextEventId++ }));
+    this._events.sort(byTick);
+  }
+
+  get events(): readonly TrackEvent[] {
+    return this._events;
+  }
+
+  // -- mutation ------------------------------------------------------
+
+  addEvent(body: TrackEventBody): TrackEvent {
+    const event: TrackEvent = { ...body, id: this.nextEventId++ };
+
+    this._events = this._events.concat(event).sort(byTick);
+
+    return event;
+  }
+
+  addEvents(bodies: readonly TrackEventBody[]): TrackEvent[] {
+    const events = bodies.map((body) => ({ ...body, id: this.nextEventId++ }));
+
+    this._events = this._events.concat(events).sort(byTick);
+
+    return events;
+  }
+
+  removeEvents(ids: Iterable<number>): void {
+    const gone = new Set(ids);
+
+    this._events = this._events.filter((event) => !gone.has(event.id));
+  }
+
+  /** patch an event by id; returns the updated event (re-sorts on tick change) */
+  updateEvent(id: number, patch: Partial<TrackEventBody>): TrackEvent | undefined {
+    const index = this._events.findIndex((event) => event.id === id);
+
+    if (index < 0) return undefined;
+
+    const updated = { ...this._events[index], ...patch } as TrackEvent;
+    const next = this._events.slice();
+
+    next[index] = updated;
+    next.sort(byTick);
+    this._events = next;
+
+    return updated;
+  }
+
+  setName(text: string): void {
+    const existing = this._events.find(
+      (event) => event.type === "meta" && event.subtype === "trackName",
+    );
+
+    if (existing) {
+      this.updateEvent(existing.id, { text });
+    } else {
+      this.addEvent({ type: "meta", subtype: "trackName", text, tick: 0 });
+    }
+  }
+
+  // -- derived -------------------------------------------------------
 
   get isConductor(): boolean {
     return this.channel === undefined;
@@ -61,8 +138,8 @@ export class Track {
   }
 
   get name(): string | undefined {
-    for (let i = this.events.length - 1; i >= 0; i--) {
-      const event = this.events[i];
+    for (let i = this._events.length - 1; i >= 0; i--) {
+      const event = this._events[i];
 
       if (event?.type === "meta" && event.subtype === "trackName") {
         return event.text;
@@ -73,8 +150,8 @@ export class Track {
   }
 
   get programNumber(): number | undefined {
-    for (let i = this.events.length - 1; i >= 0; i--) {
-      const event = this.events[i];
+    for (let i = this._events.length - 1; i >= 0; i--) {
+      const event = this._events[i];
 
       if (event?.type === "channel" && event.subtype === "programChange") {
         return event.value;
@@ -85,17 +162,36 @@ export class Track {
   }
 
   get noteCount(): number {
-    return this.events.filter(isNoteEvent).length;
+    return this._events.filter(isNoteEvent).length;
   }
 
   get endOfTrack(): number {
     let end = 0;
 
-    for (const event of this.events) {
+    for (const event of this._events) {
       end = Math.max(end, isNoteEvent(event) ? event.tick + event.duration : event.tick);
     }
 
     return end;
+  }
+
+  /** the last controller value ≤ tick for a controllerType (e.g. volume/pan) */
+  controllerValueAt(controllerType: number, tick: number): number | undefined {
+    let value: number | undefined;
+
+    for (const event of this._events) {
+      if (event.tick > tick) break;
+
+      if (
+        event.type === "channel" &&
+        event.subtype === "controller" &&
+        event.controllerType === controllerType
+      ) {
+        value = event.value;
+      }
+    }
+
+    return value;
   }
 
   /**
@@ -109,7 +205,7 @@ export class Track {
     let programChange: SendableEvent | undefined;
     let pitchBend: SendableEvent | undefined;
 
-    for (const event of this.events) {
+    for (const event of this._events) {
       if (event.tick > tick) break;
       if (event.type !== "channel") continue;
 
@@ -131,11 +227,12 @@ export class Track {
       }
     }
 
-    return [
-      ...controllers.values(),
-      ...(programChange ? [programChange] : []),
-      ...(pitchBend ? [pitchBend] : []),
-    ];
+    const result = Array.from(controllers.values());
+
+    if (programChange) result.push(programChange);
+    if (pitchBend) result.push(pitchBend);
+
+    return result;
   }
 }
 
@@ -146,42 +243,88 @@ interface TempoKeyframe {
 }
 
 export class Song implements IEventSource {
-  #allEvents: PlayerEvent[] | undefined;
-  #measures: Measure[] | undefined;
-  #tempoKeyframes: TempoKeyframe[] | undefined;
+  @tracked name: string;
+  @tracked private _tracks: Track[];
+
+  private nextTrackId: number;
 
   constructor(
-    readonly name: string,
+    name: string,
     readonly timebase: number,
-    readonly tracks: readonly Track[],
-  ) {}
+    tracks: readonly Track[],
+  ) {
+    this.name = name;
+    this._tracks = tracks.slice();
+    this.nextTrackId = Math.max(0, ...tracks.map((track) => track.id + 1));
+  }
+
+  get tracks(): readonly Track[] {
+    return this._tracks;
+  }
+
+  // -- track management ---------------------------------------------
+
+  createTrack(channel: number, bodies: readonly TrackEventBody[] = []): Track {
+    const track = new Track(this.nextTrackId++, channel, bodies);
+
+    this._tracks = this._tracks.concat(track);
+
+    return track;
+  }
+
+  removeTrack(id: number): void {
+    const track = this._tracks.find((candidate) => candidate.id === id);
+
+    if (!track || track.isConductor) return;
+
+    this._tracks = this._tracks.filter((candidate) => candidate.id !== id);
+  }
+
+  // -- derived -------------------------------------------------------
 
   get conductorTrack(): Track | undefined {
-    return this.tracks.find((track) => track.isConductor);
+    return this._tracks.find((track) => track.isConductor);
   }
 
   get playableTracks(): Track[] {
-    return this.tracks.filter((track) => !track.isConductor);
+    return this._tracks.filter((track) => !track.isConductor);
   }
 
   get lastEventTick(): number {
-    return Math.max(0, ...this.tracks.map((track) => track.endOfTrack));
+    return Math.max(0, ...this._tracks.map((track) => track.endOfTrack));
   }
 
   get endOfSong(): number {
     return this.lastEventTick + this.timebase * END_MARGIN_BEATS;
   }
 
-  get timeSignatures(): TickedEvent<TimeSignatureEvent>[] {
+  @cached
+  get timeSignatures(): (TickedEvent<TimeSignatureEvent> & { id: number })[] {
     return (this.conductorTrack?.events ?? [])
-      .filter(isTimeSignature)
-      .sort((a, b) => a.tick - b.tick);
+      .filter((e): e is TickedEvent<TimeSignatureEvent> & { id: number } => isTimeSignature(e))
+      .sort(byTick);
   }
 
+  @cached
   get measures(): Measure[] {
-    this.#measures ??= measuresFromTimeSignatures(this.timeSignatures, this.timebase);
+    return measuresFromTimeSignatures(this.timeSignatures, this.timebase);
+  }
 
-    return this.#measures;
+  @cached
+  private get tempoKeyframes(): TempoKeyframe[] {
+    const keyframes: TempoKeyframe[] = [{ tick: 0, bpm: 120, timeMs: 0 }];
+    let last = keyframes[0] as TempoKeyframe;
+
+    for (const event of this.conductorTrack?.events ?? []) {
+      if (!isSetTempo(event)) continue;
+
+      const timeMs = last.timeMs + tickToMillisec(event.tick - last.tick, last.bpm, this.timebase);
+
+      last = { tick: event.tick, bpm: 60_000_000 / event.microsecondsPerBeat, timeMs };
+      keyframes.push(last);
+    }
+
+    return keyframes;
   }
 
   /**
@@ -189,26 +332,9 @@ export class Song implements IEventSource {
    * algorithm from signal's toSynthEvents).
    */
   secondsAt(tick: number): number {
-    this.#tempoKeyframes ??= (() => {
-      const keyframes: TempoKeyframe[] = [{ tick: 0, bpm: 120, timeMs: 0 }];
-      let last = keyframes[0] as TempoKeyframe;
+    let keyframe = this.tempoKeyframes[0] as TempoKeyframe;
 
-      for (const event of this.conductorTrack?.events ?? []) {
-        if (!isSetTempo(event)) continue;
-
-        const timeMs =
-          last.timeMs + tickToMillisec(event.tick - last.tick, last.bpm, this.timebase);
-
-        last = { tick: event.tick, bpm: 60_000_000 / event.microsecondsPerBeat, timeMs };
-        keyframes.push(last);
-      }
-
-      return keyframes;
-    })();
-
-    let keyframe = this.#tempoKeyframes[0] as TempoKeyframe;
-
-    for (const candidate of this.#tempoKeyframes) {
+    for (const candidate of this.tempoKeyframes) {
       if (candidate.tick > tick) break;
       keyframe = candidate;
     }
@@ -233,9 +359,11 @@ export class Song implements IEventSource {
   /**
    * Every track's events flattened for playback: notes split back into
    * noteOn/noteOff, tagged with channel + trackId, sorted by tick.
+   * Auto-invalidates when any track's events change.
    */
+  @cached
   get allEvents(): PlayerEvent[] {
-    this.#allEvents ??= this.tracks
+    return this._tracks
       .flatMap((track) =>
         track.events.flatMap((event): PlayerEvent[] => {
           if (isNoteEvent(event)) {
@@ -253,9 +381,7 @@ export class Song implements IEventSource {
           return [{ ...raw, trackId: track.id }];
         }),
       )
-      .sort((a, b) => a.tick - b.tick);
-
-    return this.#allEvents;
+      .sort(byTick);
   }
 
   getEvents(startTick: number, endTick: number): PlayerEvent[] {
@@ -263,7 +389,7 @@ export class Song implements IEventSource {
   }
 
   getCurrentStateEvents(tick: number): SendableEvent[] {
-    return this.tracks.flatMap((track) => track.getStatusEvents(tick));
+    return this._tracks.flatMap((track) => track.getStatusEvents(tick));
   }
 }
 
@@ -281,10 +407,6 @@ function channelOf(events: readonly RawTrackEvent[]): number | undefined {
 
 function isConductorContent(e: RawTrackEvent): boolean {
   return e.type === "meta" && (e.subtype === "setTempo" || e.subtype === "timeSignature");
-}
-
-function byTick(a: { tick: number }, b: { tick: number }): number {
-  return a.tick - b.tick;
 }
 
 function dropEndOfTrack(events: RawTrackEvent[]): RawTrackEvent[] {
@@ -318,12 +440,11 @@ export function songFromMidi(data: ArrayBuffer | Uint8Array): Song {
         byChannel.set(event.channel, events);
       }
 
-      tickedTracks = [
-        { channel: undefined, events: conductor },
-        ...[...byChannel.entries()]
-          .sort(([a], [b]) => a - b)
-          .map(([channel, events]) => ({ channel, events })),
-      ];
+      tickedTracks = [{ channel: undefined, events: conductor }];
+
+      for (const [channel, events] of Array.from(byChannel.entries()).sort(([a], [b]) => a - b)) {
+        tickedTracks.push({ channel, events });
+      }
 
       break;
     }
@@ -345,10 +466,11 @@ export function songFromMidi(data: ArrayBuffer | Uint8Array): Song {
 
       conductorEvents.sort(byTick);
 
-      tickedTracks = [
-        { channel: undefined, events: conductorEvents },
-        ...normal.map((events) => ({ channel: channelOf(events), events })),
-      ];
+      tickedTracks = [{ channel: undefined, events: conductorEvents }];
+
+      for (const events of normal) {
+        tickedTracks.push({ channel: channelOf(events), events });
+      }
 
       break;
     }
@@ -364,4 +486,85 @@ export function songFromMidi(data: ArrayBuffer | Uint8Array): Song {
   const name = tracks[0]?.name ?? "";
 
   return new Song(name, timebase, tracks);
+}
+
+/**
+ * Serialize a Song back to a Standard MIDI File (format 1) — used for
+ * export, undo snapshots, and autosave.
+ */
+export function songToMidi(song: Song): Uint8Array {
+  const tracks = song.tracks.map((track) => {
+    const absolute: RawTrackEvent[] = track.events
+      .flatMap((event): RawTrackEvent[] => {
+        if (isNoteEvent(event)) {
+          return deassembleNote(event, track.channel ?? 0);
+        }
+
+        const body = { ...event } as RawTrackEvent & { id?: number };
+
+        delete body.id;
+
+        return [
+          isChannelEvent(body) && track.channel !== undefined
+            ? { ...body, channel: track.channel }
+            : body,
+        ];
+      })
+      .sort(byTick);
+
+    const result: AnyEvent[] = [];
+    let previous = 0;
+
+    for (const { tick, ...body } of absolute) {
+      result.push({ ...body, deltaTime: tick - previous });
+      previous = tick;
+    }
+
+    result.push({ type: "meta", subtype: "endOfTrack", deltaTime: 0 });
+
+    return result;
+  });
+
+  return write(tracks, song.timebase);
+}
+
+/**
+ * An empty song, matching signal's factory defaults: a conductor track
+ * (4/4, 120bpm) plus one channel-0 track preloaded with reset
+ * controllers.
+ */
+export function emptySong(): Song {
+  const conductor = new Track(0, undefined, [
+    { type: "meta", subtype: "trackName", text: "", tick: 0 },
+    {
+      type: "meta",
+      subtype: "timeSignature",
+      numerator: 4,
+      denominator: 4,
+      metronome: 24,
+      thirtyseconds: 8,
+      tick: 0,
+    },
+    { type: "meta", subtype: "setTempo", microsecondsPerBeat: 500_000, tick: 0 },
+  ]);
+
+  const channel = 0;
+  const cc = (controllerType: number, value: number): TrackEventBody => ({
+    type: "channel",
+    subtype: "controller",
+    channel,
+    controllerType,
+    value,
+    tick: 0,
+  });
+
+  const track = new Track(1, channel, [
+    { type: "meta", subtype: "trackName", text: "Track 1", tick: 0 },
+    cc(7, 100), // volume
+    cc(10, 64), // pan
+    cc(11, 127), // expression
+    { type: "channel", subtype: "programChange", channel, value: 0, tick: 0 },
+  ]);
+
+  return new Song("", 480, [conductor, track]);
 }
