@@ -4,7 +4,10 @@ import { fn } from "@ember/helper";
 import { on } from "@ember/modifier";
 import { service } from "@ember/service";
 
+import { Button } from "nvp.ui";
+
 import { GM_INSTRUMENTS } from "#app/midi/gm.ts";
+import { preventDefault } from "#utils/prevent-default.ts";
 
 import { trackColor } from "./track-color.ts";
 
@@ -112,8 +115,12 @@ export class TrackList extends Component {
     this.player.trackMute.toggleSolo(track.id);
   };
 
+  get isLastTrack(): boolean {
+    return (this.player.song?.playableTracks.length ?? 0) <= 1;
+  }
+
   <template>
-    <div class="surface elevation-md track-list">
+    <form class="surface elevation-md track-list" {{on "submit" preventDefault}}>
       <ul class="track-list__items">
         {{#each this.player.song.playableTracks as |track|}}
           <li
@@ -145,12 +152,10 @@ export class TrackList extends Component {
               >
                 {{trackLabel track}}
               </button>
-              <button
-                type="button"
-                class="preem__button track-list__icon"
-                aria-label="Rename {{trackLabel track}}"
-                {{on "click" (fn this.startRename track)}}
-              >✎</button>
+              <Button @onClick={{fn this.startRename track}}>
+                <span aria-hidden="true">✎</span>
+                <span class="sr-only">Rename {{trackLabel track}}</span>
+              </Button>
             {{/if}}
 
             {{#if track.isRhythmTrack}}
@@ -211,20 +216,19 @@ export class TrackList extends Component {
                 aria-label="Solo {{trackLabel track}}"
                 {{on "click" (fn this.toggleSolo track)}}
               >S</button>
-              <button
-                type="button"
-                class="preem__button track-list__icon"
-                aria-label="Delete {{trackLabel track}}"
-                {{on "click" (fn this.removeTrack track)}}
-              >✕</button>
+              <Button
+                @onClick={{fn this.removeTrack track}}
+                @disabled={{if this.isLastTrack "A song needs at least one track"}}
+              >
+                <span aria-hidden="true">✕</span>
+                <span class="sr-only">Delete {{trackLabel track}}</span>
+              </Button>
             </span>
           </li>
         {{/each}}
       </ul>
 
-      <button type="button" class="preem__button" {{on "click" this.addTrack}}>
-        + Add track
-      </button>
-    </div>
+      <Button @onClick={{this.addTrack}}>+ Add track</Button>
+    </form>
   </template>
 }

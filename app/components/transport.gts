@@ -2,8 +2,11 @@ import Component from "@glimmer/component";
 import { on } from "@ember/modifier";
 import { service } from "@ember/service";
 
+import { Button } from "nvp.ui";
+
 import { getMBTString } from "#app/midi/measure.ts";
 import { SYNTH_OUTPUT_ID } from "#services/player.ts";
+import { preventDefault } from "#utils/prevent-default.ts";
 
 import type EditorService from "#services/editor.ts";
 import type PlayerService from "#services/player.ts";
@@ -109,45 +112,37 @@ export class Transport extends Component {
   }
 
   <template>
-    <div class="surface elevation-md transport">
+    <form class="surface elevation-md transport" {{on "submit" preventDefault}}>
       <div class="transport__buttons">
-        <button
-          type="button"
-          class="preem__button"
-          data-variant="primary"
-          aria-label={{if this.playing "Pause" "Play"}}
-          {{on "click" this.playPause}}
-        >
-          {{if this.playing "❚❚" "▶"}}
-        </button>
-        <button
-          type="button"
-          class="preem__button"
-          aria-label="Stop and rewind"
-          {{on "click" this.stop}}
-        >
-          ■
-        </button>
-        <button
-          type="button"
-          class="preem__button transport__toggle"
-          aria-pressed="{{this.loopEnabled}}"
-          aria-label="Toggle loop (drag the ruler to set the range)"
-          title={{unless this.hasLoop "Drag the piano roll ruler to set a loop range"}}
-          disabled={{unless this.hasLoop true}}
-          {{on "click" this.toggleLoop}}
-        >
-          ⟲
-        </button>
+        <Button @variant="primary" @onClick={{this.playPause}}>
+          <span aria-hidden="true">{{if this.playing "❚❚" "▶"}}</span>
+          <span class="sr-only">{{if this.playing "Pause" "Play"}}</span>
+        </Button>
+        <Button @onClick={{this.stop}}>
+          <span aria-hidden="true">■</span>
+          <span class="sr-only">Stop and rewind</span>
+        </Button>
         {{#if this.hasLoop}}
+          {{! a real toggle needs aria-pressed, which nvp.ui Button
+              can't render yet (see nvp.ui button-pressed-state PR) }}
           <button
             type="button"
-            class="preem__button"
-            aria-label="Clear loop"
-            {{on "click" this.clearLoop}}
+            class="preem__button transport__toggle"
+            aria-pressed="{{this.loopEnabled}}"
+            aria-label="Toggle loop"
+            {{on "click" this.toggleLoop}}
           >
-            ⟲✕
+            ⟲
           </button>
+          <Button @onClick={{this.clearLoop}}>
+            <span aria-hidden="true">⟲✕</span>
+            <span class="sr-only">Clear loop</span>
+          </Button>
+        {{else}}
+          <Button @disabled="Drag the piano roll ruler to set a loop range first">
+            <span aria-hidden="true">⟲</span>
+            <span class="sr-only">Toggle loop</span>
+          </Button>
         {{/if}}
         <button
           type="button"
@@ -222,6 +217,6 @@ export class Transport extends Component {
           {{/each}}
         </select>
       </label>
-    </div>
+    </form>
   </template>
 }

@@ -6,6 +6,8 @@ import { service } from "@ember/service";
 import { modifier } from "ember-modifier";
 import { Button } from "nvp.ui";
 
+import { preventDefault } from "#utils/prevent-default.ts";
+
 import { ArrangeView } from "./arrange-view.gts";
 import { PianoRoll } from "./piano-roll.gts";
 import { TrackList } from "./track-list.gts";
@@ -191,7 +193,7 @@ export class MidiPlayer extends Component {
 
   <template>
     <div {{this.globalHandlers}} class="midi-player">
-      <div class="surface elevation-md picker">
+      <form class="surface elevation-md picker" {{on "submit" preventDefault}}>
         <label class="preem__button picker__file" data-variant="primary">
           Open .mid file
           <input
@@ -237,7 +239,7 @@ export class MidiPlayer extends Component {
             {{this.loadError}}
           </span>
         {{/if}}
-      </div>
+      </form>
 
       {{#if this.player.song}}
         {{#if this.player.player}}

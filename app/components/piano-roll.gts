@@ -5,9 +5,11 @@ import { on } from "@ember/modifier";
 import { service } from "@ember/service";
 
 import { modifier } from "ember-modifier";
+import { Button } from "nvp.ui";
 
 import { beatsInRange } from "#app/midi/measure.ts";
 import { isNoteEvent } from "#app/midi/note-assembler.ts";
+import { preventDefault } from "#utils/prevent-default.ts";
 
 import { trackColor } from "./track-color.ts";
 
@@ -1049,7 +1051,7 @@ export class PianoRoll extends Component<PianoRollSignature> {
 
   <template>
     <div class="surface elevation-md piano-roll">
-      <div class="piano-roll__toolbar">
+      <form class="piano-roll__toolbar" {{on "submit" preventDefault}}>
         <button
           type="button"
           class="preem__button piano-roll__tool"
@@ -1087,20 +1089,20 @@ export class PianoRoll extends Component<PianoRollSignature> {
           </select>
         </label>
 
-        <button
-          type="button"
-          class="preem__button"
-          aria-label="Undo"
-          disabled={{unless this.history.canUndo true}}
-          {{on "click" this.undo}}
-        >↩</button>
-        <button
-          type="button"
-          class="preem__button"
-          aria-label="Redo"
-          disabled={{unless this.history.canRedo true}}
-          {{on "click" this.redo}}
-        >↪</button>
+        <Button
+          @onClick={{this.undo}}
+          @disabled={{unless this.history.canUndo "Nothing to undo yet"}}
+        >
+          <span aria-hidden="true">↩</span>
+          <span class="sr-only">Undo</span>
+        </Button>
+        <Button
+          @onClick={{this.redo}}
+          @disabled={{unless this.history.canRedo "Nothing to redo — undo something first"}}
+        >
+          <span aria-hidden="true">↪</span>
+          <span class="sr-only">Redo</span>
+        </Button>
 
         <span class="piano-roll__hint">
           Editing
@@ -1108,19 +1110,15 @@ export class PianoRoll extends Component<PianoRollSignature> {
           · ruler: click seeks, drag loops · right-click erases · ctrl+wheel zooms
         </span>
 
-        <button
-          type="button"
-          class="preem__button"
-          aria-label="Zoom out"
-          {{on "click" this.zoomOut}}
-        >−</button>
-        <button
-          type="button"
-          class="preem__button"
-          aria-label="Zoom in"
-          {{on "click" this.zoomIn}}
-        >+</button>
-      </div>
+        <Button @onClick={{this.zoomOut}}>
+          <span aria-hidden="true">−</span>
+          <span class="sr-only">Zoom out</span>
+        </Button>
+        <Button @onClick={{this.zoomIn}}>
+          <span aria-hidden="true">+</span>
+          <span class="sr-only">Zoom in</span>
+        </Button>
+      </form>
 
       {{! template-lint-disable no-invalid-interactive }}
       <div
