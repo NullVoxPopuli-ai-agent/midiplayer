@@ -3,6 +3,7 @@ import { tracked } from "@glimmer/tracking";
 import { EventScheduler } from "./event-scheduler.ts";
 import { bpmFromSetTempo, DEFAULT_TEMPO } from "./tick.ts";
 
+import type { LoopSetting } from "./event-scheduler.ts";
 import type { IEventSource, PlayerEvent, SynthOutput } from "./types.ts";
 
 const TIMER_INTERVAL = 50;
@@ -10,7 +11,11 @@ const LOOK_AHEAD_TIME = 50;
 
 const ALL_SOUNDS_OFF = 120;
 const ALL_NOTES_OFF = 123;
+const RESET_ALL_CONTROLLERS = 121;
 const CHANNEL_COUNT = 16;
+
+// Roland GS reset (data without the leading 0xF0, midifile-ts style)
+const GS_RESET = [0x41, 0x10, 0x42, 0x12, 0x40, 0x00, 0x7f, 0x00, 0x41, 0xf7];
 
 /**
  * Drives playback: a 50ms timer reads events from the event source in
@@ -21,6 +26,7 @@ export class Player {
   @tracked private _currentTick = 0;
   @tracked private _isPlaying = false;
   @tracked private _currentTempo = DEFAULT_TEMPO;
+  @tracked private _loop: LoopSetting | null = null;
 
   private scheduler: EventScheduler<PlayerEvent> | null = null;
   private interval: number | null = null;
@@ -36,6 +42,18 @@ export class Player {
 
   get currentTempo(): number {
     return this._currentTempo;
+  }
+
+  get loop(): LoopSetting | null {
+    return this._loop;
+  }
+
+  set loop(value: LoopSetting | null) {
+    this._loop = value;
+
+    if (this.scheduler) {
+      this.scheduler.loop = value?.enabled ? value : null;
+    }
   }
 
   get position(): number {
@@ -70,10 +88,12 @@ export class Player {
 
     this.scheduler = new EventScheduler<PlayerEvent>(
       (start, end) => this.eventSource.getEvents(start, end),
+      () => this.createLoopEndEvents(),
       this._currentTick,
       this.eventSource.timebase,
       TIMER_INTERVAL + LOOK_AHEAD_TIME,
     );
+    this.scheduler.loop = this._loop?.enabled ? this._loop : null;
 
     this._isPlaying = true;
     this.interval = window.setInterval(() => this.onTimer(), TIMER_INTERVAL);
@@ -99,11 +119,30 @@ export class Player {
     }
   }
 
-  /** stop and rewind to the beginning */
+  /** stop, reset controllers, and rewind to the beginning */
   reset(): void {
+    this.resetControllers();
     this.stop();
     this._currentTick = 0;
     this._currentTempo = this.bpmAt(0);
+  }
+
+  resetControllers(): void {
+    for (let channel = 0; channel < CHANNEL_COUNT; channel++) {
+      this.output.sendEvent(
+        {
+          type: "channel",
+          subtype: "controller",
+          channel,
+          controllerType: RESET_ALL_CONTROLLERS,
+          value: 0x7f,
+        },
+        0,
+        -1,
+      );
+    }
+
+    this.output.sendEvent({ type: "sysEx", data: GS_RESET }, 0, -1);
   }
 
   teardown(): void {
@@ -140,6 +179,18 @@ export class Player {
         -1,
       );
     }
+  }
+
+  /** all-notes-off on every channel, fired at the loop boundary */
+  private createLoopEndEvents(): Omit<PlayerEvent, "tick">[] {
+    return Array.from({ length: CHANNEL_COUNT }, (_, channel) => ({
+      type: "channel" as const,
+      subtype: "controller" as const,
+      channel,
+      controllerType: ALL_NOTES_OFF,
+      value: 0,
+      trackId: -1,
+    }));
   }
 
   private bpmAt(tick: number): number {
@@ -191,6 +242,8 @@ export class Player {
       return;
     }
 
-    this._currentTick = scheduler.currentTick;
+    // after a loop wrap the scheduler's tick may briefly sit before
+    // loop.begin (even below 0) to preserve wall-clock continuity
+    this._currentTick = Math.max(0, Math.floor(scheduler.currentTick));
   }
 }

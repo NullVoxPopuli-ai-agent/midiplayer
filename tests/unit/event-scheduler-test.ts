@@ -12,6 +12,7 @@ interface Ev {
 function schedulerFor(events: Ev[], startTick = 0) {
   return new EventScheduler<Ev>(
     (start, end) => events.filter((e) => e.tick >= start && e.tick < end),
+    () => [{ boundary: true }],
     startTick,
     TIMEBASE,
     LOOK_AHEAD,
@@ -82,6 +83,65 @@ module("Unit | midi | event-scheduler", function () {
       result.map((r) => r.event.tick),
       [960],
       "events at the seek target play; earlier events don't replay",
+    );
+  });
+});
+
+module("Unit | midi | event-scheduler | loop", function () {
+  test("wraps the window at loop.end back to loop.begin", function (assert) {
+    // 120bpm: 48 ticks per 50ms; look-ahead 100ms = 96 ticks
+    const events = [{ tick: 100 }, { tick: 950 }, { tick: 970 }];
+    const scheduler = schedulerFor(events, 900);
+
+    scheduler.loop = { begin: 96, end: 960 };
+
+    // window [900, 996) crosses 960 → head [900,960), boundary (tick
+    // assigned = loop.begin), then [96, 96+36)
+    const result = scheduler.readNextEvents(120, 1000);
+
+    assert.deepEqual(
+      result.map((r) => r.event.tick),
+      [950, 96, 100],
+      "events before the boundary, loop-end events, then events from loop.begin",
+    );
+  });
+
+  test("the boundary events fire exactly at the loop end's timestamp", function (assert) {
+    const scheduler = schedulerFor([], 900);
+
+    scheduler.loop = { begin: 0, end: 960 };
+
+    const result = scheduler.readNextEvents(120, 1000);
+    const boundary = result.find((r) => "boundary" in r.event);
+
+    // 60 ticks until the boundary at 120bpm/480tpb = 62.5ms
+    assert.strictEqual(boundary?.timestamp, 1062.5);
+  });
+
+  test("position rewinds into loop coordinates and stays continuous", function (assert) {
+    const scheduler = schedulerFor([], 900);
+
+    scheduler.loop = { begin: 0, end: 960 };
+
+    scheduler.readNextEvents(120, 1000);
+    // at wrap time the position sits before loop.begin (wall-clock
+    // continuity): 0 - (960 - 900) = -60
+    assert.strictEqual(scheduler.currentTick, -60);
+
+    // 100ms = 96 ticks later, it has crossed into the loop body
+    scheduler.readNextEvents(120, 1100);
+    assert.strictEqual(scheduler.currentTick, 36);
+  });
+
+  test("no loop means no wrap", function (assert) {
+    const events = [{ tick: 950 }, { tick: 970 }];
+    const scheduler = schedulerFor(events, 900);
+
+    const result = scheduler.readNextEvents(120, 1000);
+
+    assert.deepEqual(
+      result.map((r) => r.event.tick),
+      [950, 970],
     );
   });
 });

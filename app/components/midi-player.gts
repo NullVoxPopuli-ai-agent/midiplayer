@@ -3,16 +3,28 @@ import { tracked } from "@glimmer/tracking";
 import { on } from "@ember/modifier";
 import { service } from "@ember/service";
 
+import { modifier } from "ember-modifier";
+import { Button } from "nvp.ui";
+
 import { PianoRoll } from "./piano-roll.gts";
 import { TrackList } from "./track-list.gts";
 import { Transport } from "./transport.gts";
 
 import type PlayerService from "#services/player.ts";
 
+function isMidiFile(file: File): boolean {
+  return /\.midi?$/i.test(file.name) || file.type.includes("midi");
+}
+
+function eq(a: string, b: string): boolean {
+  return a === b;
+}
+
 export class MidiPlayer extends Component {
   @service declare player: PlayerService;
 
   @tracked loadError: string | null = null;
+  @tracked isDragOver = false;
 
   onFile = (event: Event): void => {
     const input = event.target as HTMLInputElement;
@@ -30,6 +42,67 @@ export class MidiPlayer extends Component {
     void this.load(this.player.loadDemoSong());
   };
 
+  loadLast = (): void => {
+    void this.load(this.player.loadLastSong());
+  };
+
+  /**
+   * Window-level handlers: drop a .mid anywhere to load it, space to
+   * play/pause, home to rewind.
+   */
+  globalHandlers = modifier(() => {
+    const onDragOver = (event: DragEvent) => {
+      if (![...(event.dataTransfer?.types ?? [])].includes("Files")) return;
+
+      event.preventDefault();
+      this.isDragOver = true;
+    };
+
+    const onDragLeave = (event: DragEvent) => {
+      if (event.relatedTarget === null) this.isDragOver = false;
+    };
+
+    const onDrop = (event: DragEvent) => {
+      event.preventDefault();
+      this.isDragOver = false;
+
+      const file = [...(event.dataTransfer?.files ?? [])].find(isMidiFile);
+
+      if (file) {
+        void this.load(this.player.loadFile(file));
+      } else if (event.dataTransfer?.files.length) {
+        this.loadError = "That doesn't look like a .mid file";
+      }
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement;
+
+      if (["INPUT", "SELECT", "TEXTAREA", "BUTTON"].includes(target.tagName)) return;
+      if (!this.player.player) return;
+
+      if (event.code === "Space") {
+        event.preventDefault();
+        this.player.player.playOrPause();
+      } else if (event.code === "Home") {
+        event.preventDefault();
+        this.player.player.position = 0;
+      }
+    };
+
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("dragleave", onDragLeave);
+    window.addEventListener("drop", onDrop);
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("dragleave", onDragLeave);
+      window.removeEventListener("drop", onDrop);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  });
+
   private async load(promise: Promise<void>): Promise<void> {
     this.loadError = null;
 
@@ -45,64 +118,76 @@ export class MidiPlayer extends Component {
   }
 
   <template>
-    <div class="surface elevation-md picker">
-      <label class="preem__button picker__file" data-variant="primary">
-        Open .mid file
-        <input
-          type="file"
-          accept=".mid,.midi,audio/midi,audio/x-midi"
-          hidden
-          {{on "change" this.onFile}}
-        />
-      </label>
+    <div {{this.globalHandlers}} class="midi-player">
+      <div class="surface elevation-md picker">
+        <label class="preem__button picker__file" data-variant="primary">
+          Open .mid file
+          <input
+            type="file"
+            accept=".mid,.midi,audio/midi,audio/x-midi"
+            hidden
+            {{on "change" this.onFile}}
+          />
+        </label>
 
-      <button type="button" class="preem__button" {{on "click" this.loadDemo}}>
-        Play the demo song
-      </button>
+        <Button @onClick={{this.loadDemo}}>Play the demo song</Button>
 
-      {{#if this.player.fileName}}
-        <span class="picker__file-name">{{this.player.fileName}}</span>
+        {{#if this.player.lastFile}}
+          {{#unless this.player.song}}
+            <Button @onClick={{this.loadLast}} @variant="secondary">
+              <:start>↻</:start>
+              <:text>Resume {{this.player.lastFile.name}}</:text>
+            </Button>
+          {{/unless}}
+        {{/if}}
+
+        {{#if this.player.fileName}}
+          <span class="picker__file-name">{{this.player.fileName}}</span>
+        {{/if}}
+
+        {{#if (eq this.player.soundFontStatus "loading")}}
+          <span class="picker__status" role="status">
+            Downloading soundfont (A320U, ~9.7 MB)…
+            {{this.soundFontPercent}}
+          </span>
+        {{/if}}
+
+        {{#if this.loadError}}
+          <span class="picker__status picker__status--error" role="alert">
+            {{this.loadError}}
+          </span>
+        {{/if}}
+      </div>
+
+      {{#if this.player.song}}
+        {{#if this.player.player}}
+          <Transport />
+          <PianoRoll
+            @song={{this.player.song}}
+            @player={{this.player.player}}
+            @trackMute={{this.player.trackMute}}
+          />
+          <TrackList />
+        {{/if}}
+      {{else}}
+        <div class="surface elevation-sm empty-state">
+          <p>
+            Load a Standard MIDI File — open it, or drop it anywhere on this window — and it will
+            play in your browser through the same soundfont synth engine as
+            <a href="https://github.com/ryohey/signal">ryohey/signal</a>.
+          </p>
+          <p>
+            Nothing is uploaded anywhere: parsing, scheduling, and synthesis all happen locally.
+            Space plays/pauses; Home rewinds.
+          </p>
+        </div>
       {{/if}}
 
-      {{#if (eq this.player.soundFontStatus "loading")}}
-        <span class="picker__status" role="status">
-          Downloading soundfont (A320U, ~9.7 MB)…
-          {{this.soundFontPercent}}
-        </span>
-      {{/if}}
-
-      {{#if this.loadError}}
-        <span class="picker__status picker__status--error" role="alert">
-          {{this.loadError}}
-        </span>
+      {{#if this.isDragOver}}
+        <div class="drop-overlay" aria-hidden="true">
+          <span class="drop-overlay__label">Drop your .mid file to play it</span>
+        </div>
       {{/if}}
     </div>
-
-    {{#if this.player.song}}
-      {{#if this.player.player}}
-        <Transport />
-        <PianoRoll
-          @song={{this.player.song}}
-          @player={{this.player.player}}
-          @trackMute={{this.player.trackMute}}
-        />
-        <TrackList />
-      {{/if}}
-    {{else}}
-      <div class="surface elevation-sm empty-state">
-        <p>
-          Load a Standard MIDI File (.mid) — or try the generated demo song — and it will play in
-          your browser through the same soundfont synth engine as
-          <a href="https://github.com/ryohey/signal">ryohey/signal</a>.
-        </p>
-        <p>
-          Nothing is uploaded anywhere: parsing, scheduling, and synthesis all happen locally.
-        </p>
-      </div>
-    {{/if}}
   </template>
-}
-
-function eq(a: string, b: string): boolean {
-  return a === b;
 }

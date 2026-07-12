@@ -44,7 +44,7 @@
     "ember-source": "7.0.0",
     "ember-strict-application-resolver": "0.1.1",
     "midifile-ts": "1.5.2",
-    "nvp.ui": "0.5.3"
+    "nvp.ui": "0.6.0"
   },
   "devDependencies": {
     "@babel/core": "7.29.7",

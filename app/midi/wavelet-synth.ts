@@ -5,38 +5,30 @@ import processorUrl from "@ryohey/wavelet/dist/processor.js?url";
 import type { SendableEvent, SynthOutput } from "./types.ts";
 import type { SynthEvent } from "@ryohey/wavelet";
 
+const registeredContexts = new WeakSet<AudioContext>();
+
 /**
  * @ryohey/wavelet's AudioWorklet soundfont synth, wrapped in signal's
  * SynthOutput interface. delayTime is converted from seconds to sample
  * frames, which is what the worklet's scheduler expects.
+ *
+ * Multiple instances (main + metronome, like signal) can share one
+ * AudioContext; the worklet module is registered once per context.
  */
 export class WaveletSynth implements SynthOutput {
-  readonly context: AudioContext;
-
   private node: AudioWorkletNode | null = null;
-  private gain: GainNode;
   private sequenceNumber = 0;
-  private isSetup = false;
 
-  constructor() {
-    this.context = new AudioContext();
-    this.gain = this.context.createGain();
-    this.gain.connect(this.context.destination);
-  }
-
-  get volume(): number {
-    return this.gain.gain.value;
-  }
-
-  set volume(value: number) {
-    this.gain.gain.value = value;
-  }
+  constructor(
+    readonly context: AudioContext,
+    private readonly destination: AudioNode,
+  ) {}
 
   async setup(): Promise<void> {
-    if (this.isSetup) return;
+    if (registeredContexts.has(this.context)) return;
 
     await this.context.audioWorklet.addModule(processorUrl);
-    this.isSetup = true;
+    registeredContexts.add(this.context);
   }
 
   loadSoundFont(data: ArrayBuffer): void {
@@ -47,7 +39,7 @@ export class WaveletSynth implements SynthOutput {
       numberOfInputs: 0,
       outputChannelCount: [2],
     });
-    this.node.connect(this.gain);
+    this.node.connect(this.destination);
 
     for (const { event, transfer } of getSampleEventsFromSoundFont(new Uint8Array(data))) {
       this.postSynthMessage(event, transfer);

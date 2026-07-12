@@ -83,3 +83,53 @@ export function getMBTString(measures: readonly Measure[], tick: number, timebas
 
   return `${mmmm}:${bb}:${ttt}`;
 }
+
+export interface Beat {
+  tick: number;
+  /** true when this beat starts a measure */
+  isMeasureStart: boolean;
+  /** 0-based measure index (for ruler labels) */
+  measureNumber: number;
+}
+
+/**
+ * All beats in [startTick, endTick) — used for the ruler and for
+ * metronome click generation (signal's Beat.createInRange).
+ */
+export function beatsInRange(
+  measures: readonly Measure[],
+  timebase: number,
+  startTick: number,
+  endTick: number,
+): Beat[] {
+  const beats: Beat[] = [];
+
+  for (const [index, measure] of measures.entries()) {
+    const next = measures[index + 1];
+    const segmentEnd = Math.min(next?.tick ?? Infinity, endTick);
+
+    if (segmentEnd <= startTick) continue;
+    if (measure.tick >= endTick) break;
+
+    const ticksPerBeat = (timebase * 4) / measure.denominator;
+    const perMeasure = ticksPerBeat * measure.numerator;
+
+    // first beat in this segment at or after startTick
+    const firstIndex = Math.max(0, Math.floor((startTick - measure.tick) / ticksPerBeat));
+
+    for (let i = firstIndex; ; i++) {
+      const tick = measure.tick + i * ticksPerBeat;
+
+      if (tick >= segmentEnd) break;
+      if (tick < startTick) continue;
+
+      beats.push({
+        tick,
+        isMeasureStart: i % measure.numerator === 0,
+        measureNumber: measure.number + Math.floor((i * ticksPerBeat) / perMeasure),
+      });
+    }
+  }
+
+  return beats;
+}

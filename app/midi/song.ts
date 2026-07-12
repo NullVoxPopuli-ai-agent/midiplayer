@@ -2,6 +2,7 @@ import { read } from "midifile-ts";
 
 import { measuresFromTimeSignatures } from "./measure.ts";
 import { assembleNotes, deassembleNote, isNoteEvent } from "./note-assembler.ts";
+import { tickToMillisec } from "./tick.ts";
 
 import type { Measure } from "./measure.ts";
 import type {
@@ -138,9 +139,16 @@ export class Track {
   }
 }
 
+interface TempoKeyframe {
+  tick: number;
+  bpm: number;
+  timeMs: number;
+}
+
 export class Song implements IEventSource {
   #allEvents: PlayerEvent[] | undefined;
   #measures: Measure[] | undefined;
+  #tempoKeyframes: TempoKeyframe[] | undefined;
 
   constructor(
     readonly name: string,
@@ -174,6 +182,40 @@ export class Song implements IEventSource {
     this.#measures ??= measuresFromTimeSignatures(this.timeSignatures, this.timebase);
 
     return this.#measures;
+  }
+
+  /**
+   * Wall-clock seconds at `tick`, walking the tempo map (the keyframe
+   * algorithm from signal's toSynthEvents).
+   */
+  secondsAt(tick: number): number {
+    this.#tempoKeyframes ??= (() => {
+      const keyframes: TempoKeyframe[] = [{ tick: 0, bpm: 120, timeMs: 0 }];
+      let last = keyframes[0] as TempoKeyframe;
+
+      for (const event of this.conductorTrack?.events ?? []) {
+        if (!isSetTempo(event)) continue;
+
+        const timeMs =
+          last.timeMs + tickToMillisec(event.tick - last.tick, last.bpm, this.timebase);
+
+        last = { tick: event.tick, bpm: 60_000_000 / event.microsecondsPerBeat, timeMs };
+        keyframes.push(last);
+      }
+
+      return keyframes;
+    })();
+
+    let keyframe = this.#tempoKeyframes[0] as TempoKeyframe;
+
+    for (const candidate of this.#tempoKeyframes) {
+      if (candidate.tick > tick) break;
+      keyframe = candidate;
+    }
+
+    return (
+      (keyframe.timeMs + tickToMillisec(tick - keyframe.tick, keyframe.bpm, this.timebase)) / 1000
+    );
   }
 
   /** bpm in effect at `tick` (from the conductor track's setTempo events) */
