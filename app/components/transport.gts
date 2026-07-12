@@ -2,7 +2,7 @@ import Component from "@glimmer/component";
 import { on } from "@ember/modifier";
 import { service } from "@ember/service";
 
-import { Button } from "nvp.ui";
+import { Button, ToggleButton } from "nvp.ui";
 
 import { getMBTString } from "#app/midi/measure.ts";
 import { SYNTH_OUTPUT_ID } from "#services/player.ts";
@@ -122,47 +122,32 @@ export class Transport extends Component {
           <span aria-hidden="true">■</span>
           <span class="sr-only">Stop and rewind</span>
         </Button>
+        <ToggleButton
+          @pressed={{this.loopEnabled}}
+          @onClick={{this.toggleLoop}}
+          @disabled={{unless this.hasLoop "Drag the piano roll ruler to set a loop range first"}}
+        >
+          <span aria-hidden="true">⟲</span>
+          <span class="sr-only">Toggle loop</span>
+        </ToggleButton>
         {{#if this.hasLoop}}
-          {{! a real toggle needs aria-pressed, which nvp.ui Button can't
-              take yet — splattributes PR in flight; convert these when
-              Button gains ...attributes }}
-          <button
-            type="button"
-            class="preem__button transport__toggle"
-            aria-pressed="{{this.loopEnabled}}"
-            aria-label="Toggle loop"
-            {{on "click" this.toggleLoop}}
-          >
-            ⟲
-          </button>
           <Button @onClick={{this.clearLoop}}>
             <span aria-hidden="true">⟲✕</span>
             <span class="sr-only">Clear loop</span>
           </Button>
-        {{else}}
-          <Button @disabled="Drag the piano roll ruler to set a loop range first">
-            <span aria-hidden="true">⟲</span>
-            <span class="sr-only">Toggle loop</span>
-          </Button>
         {{/if}}
-        <button
-          type="button"
-          class="preem__button transport__toggle"
-          aria-pressed="{{this.player.metronomeEnabled}}"
-          aria-label="Toggle metronome"
-          {{on "click" this.toggleMetronome}}
+        <ToggleButton @pressed={{this.player.metronomeEnabled}} @onClick={{this.toggleMetronome}}>
+          <span aria-hidden="true">🜛</span>
+          <span class="sr-only">Toggle metronome</span>
+        </ToggleButton>
+        <ToggleButton
+          @pressed={{this.editor.isRecording}}
+          @onClick={{this.toggleRecording}}
+          class="transport__record"
         >
-          🜛
-        </button>
-        <button
-          type="button"
-          class="preem__button transport__toggle transport__record"
-          aria-pressed="{{this.editor.isRecording}}"
-          aria-label="Record from MIDI input onto the edited track"
-          {{on "click" this.toggleRecording}}
-        >
-          ●
-        </button>
+          <span aria-hidden="true">●</span>
+          <span class="sr-only">Record from MIDI input onto the edited track</span>
+        </ToggleButton>
       </div>
 
       {{#if this.editor.recordingStatus}}

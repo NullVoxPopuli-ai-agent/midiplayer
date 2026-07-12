@@ -99,15 +99,6 @@
   border-radius: var(--radius, 0.5rem);
 }
 
-.transport__toggle[aria-pressed="true"],
-.track-list__toggle[aria-pressed="true"] {
-  background: var(--color-primary);
-}
-
-.transport__toggle[disabled] {
-  opacity: 0.4;
-}
-
 /* piano roll */
 
 .piano-roll {
@@ -206,10 +197,6 @@
   text-align: left;
   cursor: pointer;
   padding: 0.25rem 0;
-}
-
-.piano-roll__tool[aria-pressed="true"] {
-  background: var(--color-primary);
 }
 
 .piano-roll__quantize {

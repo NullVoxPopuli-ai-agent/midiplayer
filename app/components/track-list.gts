@@ -4,7 +4,7 @@ import { fn } from "@ember/helper";
 import { on } from "@ember/modifier";
 import { service } from "@ember/service";
 
-import { Button } from "nvp.ui";
+import { Button, ToggleButton } from "nvp.ui";
 
 import { GM_INSTRUMENTS } from "#app/midi/gm.ts";
 import { preventDefault } from "#utils/prevent-default.ts";
@@ -202,20 +202,20 @@ export class TrackList extends Component {
             <span class="track-list__meta">{{track.noteCount}} notes</span>
 
             <span class="track-list__controls">
-              <button
-                type="button"
-                class="preem__button track-list__toggle"
-                aria-pressed="{{this.player.trackMute.isMuted track.id}}"
-                aria-label="Mute {{trackLabel track}}"
-                {{on "click" (fn this.toggleMute track)}}
-              >M</button>
-              <button
-                type="button"
-                class="preem__button track-list__toggle"
-                aria-pressed="{{this.player.trackMute.isSolo track.id}}"
-                aria-label="Solo {{trackLabel track}}"
-                {{on "click" (fn this.toggleSolo track)}}
-              >S</button>
+              <ToggleButton
+                @pressed={{this.player.trackMute.isMuted track.id}}
+                @onClick={{fn this.toggleMute track}}
+              >
+                <span aria-hidden="true">M</span>
+                <span class="sr-only">Mute {{trackLabel track}}</span>
+              </ToggleButton>
+              <ToggleButton
+                @pressed={{this.player.trackMute.isSolo track.id}}
+                @onClick={{fn this.toggleSolo track}}
+              >
+                <span aria-hidden="true">S</span>
+                <span class="sr-only">Solo {{trackLabel track}}</span>
+              </ToggleButton>
               <Button
                 @onClick={{fn this.removeTrack track}}
                 @disabled={{if this.isLastTrack "A song needs at least one track"}}

@@ -5,7 +5,7 @@ import { on } from "@ember/modifier";
 import { service } from "@ember/service";
 
 import { modifier } from "ember-modifier";
-import { Button } from "nvp.ui";
+import { Button, ToggleButton } from "nvp.ui";
 
 import { beatsInRange } from "#app/midi/measure.ts";
 import { isNoteEvent } from "#app/midi/note-assembler.ts";
@@ -1052,20 +1052,20 @@ export class PianoRoll extends Component<PianoRollSignature> {
   <template>
     <div class="surface elevation-md piano-roll">
       <form class="piano-roll__toolbar" {{on "submit" preventDefault}}>
-        <button
-          type="button"
-          class="preem__button piano-roll__tool"
-          aria-pressed="{{if (isTool this.editor.tool 'pencil') 'true' 'false'}}"
-          aria-label="Pencil tool (draw, move, resize notes)"
-          {{on "click" (fn this.setTool "pencil")}}
-        >✏️</button>
-        <button
-          type="button"
-          class="preem__button piano-roll__tool"
-          aria-pressed="{{if (isTool this.editor.tool 'selection') 'true' 'false'}}"
-          aria-label="Selection tool"
-          {{on "click" (fn this.setTool "selection")}}
-        >⬚</button>
+        <ToggleButton
+          @pressed={{isTool this.editor.tool "pencil"}}
+          @onClick={{fn this.setTool "pencil"}}
+        >
+          <span aria-hidden="true">✏️</span>
+          <span class="sr-only">Pencil tool (draw, move, resize notes)</span>
+        </ToggleButton>
+        <ToggleButton
+          @pressed={{isTool this.editor.tool "selection"}}
+          @onClick={{fn this.setTool "selection"}}
+        >
+          <span aria-hidden="true">⬚</span>
+          <span class="sr-only">Selection tool</span>
+        </ToggleButton>
 
         <label class="piano-roll__quantize">
           Snap

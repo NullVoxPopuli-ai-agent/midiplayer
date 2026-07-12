@@ -35,8 +35,8 @@ importers:
         specifier: 1.5.2
         version: 1.5.2
       nvp.ui:
-        specifier: 0.6.0
-        version: 0.6.0(@babel/core@7.29.7)(ember-source@7.0.0(@glimmer/component@2.1.1))
+        specifier: 0.7.0
+        version: 0.7.0(@babel/core@7.29.7)(ember-source@7.0.0(@glimmer/component@2.1.1))
     devDependencies:
       "@babel/core":
         specifier: 7.29.7
@@ -6122,10 +6122,10 @@ packages:
     engines: { node: ^12.13.0 || ^14.15.0 || >=16.0.0 }
     deprecated: This package is no longer supported.
 
-  nvp.ui@0.6.0:
+  nvp.ui@0.7.0:
     resolution:
       {
-        integrity: sha512-dcpzkpLDVlwSIIK0md7w3TeMgxjb7oPaU0pEDqqk/9DoUJeBBMwUs+HHYWFxp7n4HT7HCbwSYWxcO8GR7Sri+w==,
+        integrity: sha512-r3a9gpan3gNTNa2v+kmAX+zn3S14SC6Pp71k2tVZSIbXPYDYK9JTDbIbR4CcSOkcVQLgJLLhFDCGC7jYasbLcw==,
       }
 
   nwsapi@2.2.24:
@@ -12368,7 +12368,7 @@ snapshots:
       gauge: 4.0.4
       set-blocking: 2.0.0
 
-  nvp.ui@0.6.0(@babel/core@7.29.7)(ember-source@7.0.0(@glimmer/component@2.1.1)):
+  nvp.ui@0.7.0(@babel/core@7.29.7)(ember-source@7.0.0(@glimmer/component@2.1.1)):
     dependencies:
       "@ember/test-helpers": 5.4.3(@babel/core@7.29.7)
       "@ember/test-waiters": 4.1.2
