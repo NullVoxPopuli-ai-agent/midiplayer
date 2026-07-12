@@ -123,8 +123,9 @@ export class Transport extends Component {
           <span class="sr-only">Stop and rewind</span>
         </Button>
         {{#if this.hasLoop}}
-          {{! a real toggle needs aria-pressed, which nvp.ui Button
-              can't render yet (see nvp.ui button-pressed-state PR) }}
+          {{! a real toggle needs aria-pressed, which nvp.ui Button can't
+              take yet — splattributes PR in flight; convert these when
+              Button gains ...attributes }}
           <button
             type="button"
             class="preem__button transport__toggle"
