@@ -25,6 +25,8 @@ import type HistoryService from "#services/history.ts";
 const RULER_HEIGHT = 26;
 const KEYS_WIDTH = 44;
 const PIXELS_PER_KEY = 8;
+/** folded rows stretch to use free vertical space, up to this */
+const MAX_ROW_HEIGHT = 26;
 
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 16;
@@ -163,6 +165,25 @@ export class PianoRoll extends Component<PianoRollSignature> {
 
   private get layout() {
     return keyLayout(this.editor.selectedTrack?.events, this.folded);
+  }
+
+  /**
+   * When folded frees vertical space, rows grow into it (up to
+   * MAX_ROW_HEIGHT) so the sparse roll is easier to read.
+   */
+  private get rowHeight(): number {
+    const layout = this.layout;
+
+    if (!layout.folded || !this.viewport || layout.keys.length === 0) {
+      return PIXELS_PER_KEY;
+    }
+
+    const available = this.viewport.clientHeight - RULER_HEIGHT - LANE_HEIGHT;
+
+    return Math.max(
+      PIXELS_PER_KEY,
+      Math.min(MAX_ROW_HEIGHT, Math.floor(available / layout.keys.length)),
+    );
   }
   private rulerDrag: { startTick: number; dragged: boolean } | null = null;
   private noteDrag: NoteDrag | null = null;
@@ -530,7 +551,7 @@ export class PianoRoll extends Component<PianoRollSignature> {
 
   private keyAt(viewportY: number): number {
     const scrollTop = this.viewport?.scrollTop ?? 0;
-    const row = Math.floor((scrollTop + viewportY - RULER_HEIGHT) / PIXELS_PER_KEY);
+    const row = Math.floor((scrollTop + viewportY - RULER_HEIGHT) / this.rowHeight);
     const { keys } = this.layout;
     const clamped = Math.min(keys.length - 1, Math.max(0, row));
 
@@ -624,7 +645,11 @@ export class PianoRoll extends Component<PianoRollSignature> {
     this.canvas = viewport.querySelector("canvas");
     this.spacer = viewport.querySelector(".piano-roll__spacer");
 
-    const observer = new ResizeObserver(() => this.draw());
+    const observer = new ResizeObserver(() => {
+      // folded row height depends on the viewport size
+      this.syncSpacer();
+      this.draw();
+    });
 
     observer.observe(viewport);
 
@@ -683,7 +708,7 @@ export class PianoRoll extends Component<PianoRollSignature> {
     const width = Math.ceil(this.args.song.endOfSong * this.pixelsPerTick) + KEYS_WIDTH;
 
     this.spacer.style.width = `${width}px`;
-    this.spacer.style.height = `${this.layout.keys.length * PIXELS_PER_KEY + RULER_HEIGHT}px`;
+    this.spacer.style.height = `${this.layout.keys.length * this.rowHeight + RULER_HEIGHT}px`;
   }
 
   private scrollToNotes(): void {
@@ -766,10 +791,11 @@ export class PianoRoll extends Component<PianoRollSignature> {
     const endTick = (scrollX + width) / ppt;
 
     const layout = this.layout;
+    const rowHeight = this.rowHeight;
     const xOf = (tick: number): number => tick * ppt - scrollX + KEYS_WIDTH;
     // hidden (folded-away) keys map to NaN and are skipped by callers
     const yOf = (key: number): number =>
-      (layout.rowOf.get(key) ?? Number.NaN) * PIXELS_PER_KEY - scrollY + RULER_HEIGHT;
+      (layout.rowOf.get(key) ?? Number.NaN) * rowHeight - scrollY + RULER_HEIGHT;
 
     const laneTop = height - LANE_HEIGHT;
 
@@ -948,9 +974,9 @@ export class PianoRoll extends Component<PianoRollSignature> {
 
       const y = yOf(key);
 
-      if (Number.isNaN(y) || y + PIXELS_PER_KEY < RULER_HEIGHT || y > height) continue;
+      if (Number.isNaN(y) || y + this.rowHeight < RULER_HEIGHT || y > height) continue;
 
-      ctx.fillRect(KEYS_WIDTH, y, width - KEYS_WIDTH, PIXELS_PER_KEY);
+      ctx.fillRect(KEYS_WIDTH, y, width - KEYS_WIDTH, this.rowHeight);
     }
 
     // beat + measure grid
@@ -988,9 +1014,9 @@ export class PianoRoll extends Component<PianoRollSignature> {
         const y = yOf(event.noteNumber);
 
         // NaN = pitch is folded away (ghost notes on hidden rows)
-        if (Number.isNaN(y) || y + PIXELS_PER_KEY < RULER_HEIGHT || y > height) continue;
+        if (Number.isNaN(y) || y + this.rowHeight < RULER_HEIGHT || y > height) continue;
 
-        const noteHeight = PIXELS_PER_KEY - 1;
+        const noteHeight = this.rowHeight - 1;
         const selected = isSelectedTrack && this.editor.selection.has(event.id);
 
         if (track.isRhythmTrack) {
@@ -1027,7 +1053,7 @@ export class PianoRoll extends Component<PianoRollSignature> {
       const [minTick, maxTick] = order(this.rubber.startTick, this.rubber.endTick);
       const [minKey, maxKey] = order(this.rubber.startKey, this.rubber.endKey);
       const topY = yOf(maxKey);
-      const bottomY = yOf(minKey) + PIXELS_PER_KEY;
+      const bottomY = yOf(minKey) + this.rowHeight;
 
       ctx.globalAlpha = 0.15;
       ctx.fillStyle = theme.primary;
@@ -1111,20 +1137,20 @@ export class PianoRoll extends Component<PianoRollSignature> {
     for (const key of layout.keys) {
       const y = yOf(key);
 
-      if (y + PIXELS_PER_KEY < RULER_HEIGHT || y > height) continue;
+      if (y + this.rowHeight < RULER_HEIGHT || y > height) continue;
 
       const hovered = key === this.hoveredKey;
 
       if (hovered) {
         ctx.globalAlpha = 0.35;
         ctx.fillStyle = theme.primary;
-        ctx.fillRect(0, y, KEYS_WIDTH, PIXELS_PER_KEY);
+        ctx.fillRect(0, y, KEYS_WIDTH, this.rowHeight);
       }
 
       if (BLACK_KEYS.has(key % 12)) {
         ctx.globalAlpha = 0.7;
         ctx.fillStyle = theme.text;
-        ctx.fillRect(0, y, KEYS_WIDTH * 0.6, PIXELS_PER_KEY);
+        ctx.fillRect(0, y, KEYS_WIDTH * 0.6, this.rowHeight);
       }
 
       // labels: every row when folded (rows are sparse), octave Cs
@@ -1134,13 +1160,13 @@ export class PianoRoll extends Component<PianoRollSignature> {
       if (label) {
         ctx.globalAlpha = hovered ? 1 : 0.7;
         ctx.fillStyle = hovered ? theme.primary : theme.text;
-        ctx.fillText(noteName(key), KEYS_WIDTH * 0.62, y + PIXELS_PER_KEY / 2);
+        ctx.fillText(noteName(key), KEYS_WIDTH * 0.62, y + this.rowHeight / 2);
       }
 
       if (key % 12 === 0 && !layout.folded) {
         ctx.globalAlpha = 0.25;
         ctx.fillStyle = theme.text;
-        ctx.fillRect(0, y + PIXELS_PER_KEY - 1, KEYS_WIDTH, 1);
+        ctx.fillRect(0, y + this.rowHeight - 1, KEYS_WIDTH, 1);
       }
     }
 
