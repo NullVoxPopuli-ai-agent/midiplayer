@@ -188,19 +188,14 @@ export class MidiPlayer extends Component {
   }
 
   get showStatusStrip(): boolean {
-    return Boolean(
-      this.player.fileName || this.player.soundFontStatus === "loading" || this.player.loadError,
-    );
+    // transient states only — the song title lives in the header bar
+    return Boolean(this.player.soundFontStatus === "loading" || this.player.loadError);
   }
 
   <template>
     <div {{this.globalHandlers}} class="midi-player">
       {{#if this.showStatusStrip}}
         <div class="surface elevation-md picker">
-          {{#if this.player.fileName}}
-            <span class="picker__file-name">{{this.player.fileName}}</span>
-          {{/if}}
-
           {{#if (eq this.player.soundFontStatus "loading")}}
             <span class="picker__status" role="status">
               Downloading soundfont (A320U, ~9.7 MB)…

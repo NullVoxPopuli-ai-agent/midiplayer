@@ -92,6 +92,10 @@ export class FileMenu extends Component {
         {{this.registerFileInput}}
         {{on "change" this.onFile}}
       />
+
+      {{#if this.player.fileName}}
+        <span class="file-menu__song-title">{{this.player.fileName}}</span>
+      {{/if}}
     </form>
   </template>
 }

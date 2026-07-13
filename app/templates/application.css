@@ -352,3 +352,17 @@ body {
   white-space: nowrap;
   border: 0;
 }
+
+.file-menu__song-title {
+  font-weight: 600;
+  opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40vw;
+}
+
+.file-menu {
+  align-items: center;
+  gap: var(--gap-3, 1rem);
+}
