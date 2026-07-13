@@ -965,18 +965,40 @@ export class PianoRoll extends Component<PianoRollSignature> {
     ctx.rect(KEYS_WIDTH, RULER_HEIGHT, width - KEYS_WIDTH, height - RULER_HEIGHT);
     ctx.clip();
 
-    // black-key lanes
-    ctx.globalAlpha = 0.07;
+    // row backgrounds: black-key lanes unfolded; Ableton-style
+    // alternating stripes + per-row grid lines when folded (sparse
+    // rows are unreadable without them)
+    const layout = this.layout;
+
     ctx.fillStyle = theme.text;
 
-    for (const key of this.layout.keys) {
-      if (!BLACK_KEYS.has(key % 12)) continue;
-
+    layout.keys.forEach((key, row) => {
       const y = yOf(key);
 
-      if (Number.isNaN(y) || y + this.rowHeight < RULER_HEIGHT || y > height) continue;
+      if (Number.isNaN(y) || y + this.rowHeight < RULER_HEIGHT || y > height) return;
 
-      ctx.fillRect(KEYS_WIDTH, y, width - KEYS_WIDTH, this.rowHeight);
+      if (layout.folded) {
+        if (row % 2 === 1) {
+          ctx.globalAlpha = 0.05;
+          ctx.fillRect(KEYS_WIDTH, y, width - KEYS_WIDTH, this.rowHeight);
+        }
+
+        ctx.globalAlpha = 0.14;
+        ctx.fillRect(KEYS_WIDTH, y + this.rowHeight - 1, width - KEYS_WIDTH, 1);
+      } else if (BLACK_KEYS.has(key % 12)) {
+        ctx.globalAlpha = 0.07;
+        ctx.fillRect(KEYS_WIDTH, y, width - KEYS_WIDTH, this.rowHeight);
+      }
+    });
+
+    if (layout.folded && layout.keys.length > 0) {
+      // top border of the first row completes the grid
+      const firstY = yOf(layout.keys[0] ?? 0);
+
+      if (!Number.isNaN(firstY)) {
+        ctx.globalAlpha = 0.14;
+        ctx.fillRect(KEYS_WIDTH, firstY, width - KEYS_WIDTH, 1);
+      }
     }
 
     // beat + measure grid
