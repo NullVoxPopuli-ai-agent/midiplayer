@@ -2,10 +2,12 @@
 import "nvp.ui/button";
 import "./application.css";
 
+import { PortalTargets } from "ember-primitives";
 import { Header, Shell, ThemeToggle } from "nvp.ui";
 
 <template>
   <Shell>
+    <PortalTargets />
     <Header>
       <:left><strong>MIDI Player</strong></:left>
       <:right><ThemeToggle /></:right>

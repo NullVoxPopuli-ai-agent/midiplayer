@@ -4,7 +4,7 @@ import { on } from "@ember/modifier";
 import { service } from "@ember/service";
 
 import { modifier } from "ember-modifier";
-import { Button } from "nvp.ui";
+import { Menu } from "nvp.ui/menu";
 
 import { preventDefault } from "#utils/prevent-default.ts";
 
@@ -32,6 +32,18 @@ export class MidiPlayer extends Component {
 
   @tracked loadError: string | null = null;
   @tracked isDragOver = false;
+
+  private fileInput: HTMLInputElement | null = null;
+
+  registerFileInput = modifier((element: HTMLInputElement) => {
+    this.fileInput = element;
+
+    return () => (this.fileInput = null);
+  });
+
+  openFilePicker = (): void => {
+    this.fileInput?.click();
+  };
 
   newSong = (): void => {
     void this.load(this.player.newSong());
@@ -194,34 +206,34 @@ export class MidiPlayer extends Component {
   <template>
     <div {{this.globalHandlers}} class="midi-player">
       <form class="surface elevation-md picker" {{on "submit" preventDefault}}>
-        <label class="preem__button picker__file" data-variant="primary">
-          Open .mid file
-          <input
-            type="file"
-            accept=".mid,.midi,audio/midi,audio/x-midi"
-            hidden
-            {{on "change" this.onFile}}
-          />
-        </label>
+        {{! signal's File menu, via nvp.ui Menu }}
+        <Menu @variant="primary" as |m|>
+          <m.Trigger>File</m.Trigger>
+          <m.Content as |c|>
+            <c.Item @onSelect={{this.newSong}}>New song</c.Item>
+            <c.Item @onSelect={{this.openFilePicker}}>Open .mid file…</c.Item>
+            {{#if this.player.lastFile}}
+              <c.Item @onSelect={{this.loadLast}}>
+                Resume
+                {{this.player.lastFile.name}}
+              </c.Item>
+            {{/if}}
+            {{#if this.player.song}}
+              <c.Item @onSelect={{this.exportMidi}}>Export .mid</c.Item>
+            {{/if}}
+            <c.Separator />
+            <c.Item @onSelect={{this.loadDemo}}>Play the demo song</c.Item>
+          </m.Content>
+        </Menu>
 
-        <Button @onClick={{this.loadDemo}}>Play the demo song</Button>
-        <Button @onClick={{this.newSong}}>New song</Button>
-
-        {{#if this.player.song}}
-          <Button @onClick={{this.exportMidi}}>
-            <:start>⬇</:start>
-            <:text>Export .mid</:text>
-          </Button>
-        {{/if}}
-
-        {{#if this.player.lastFile}}
-          {{#unless this.player.song}}
-            <Button @onClick={{this.loadLast}} @variant="secondary">
-              <:start>↻</:start>
-              <:text>Resume {{this.player.lastFile.name}}</:text>
-            </Button>
-          {{/unless}}
-        {{/if}}
+        <input
+          type="file"
+          accept=".mid,.midi,audio/midi,audio/x-midi"
+          hidden
+          aria-label="Open a MIDI file"
+          {{this.registerFileInput}}
+          {{on "change" this.onFile}}
+        />
 
         {{#if this.player.fileName}}
           <span class="picker__file-name">{{this.player.fileName}}</span>
@@ -245,12 +257,14 @@ export class MidiPlayer extends Component {
         {{#if this.player.player}}
           <Transport />
           <ArrangeView />
-          <PianoRoll
-            @song={{this.player.song}}
-            @player={{this.player.player}}
-            @trackMute={{this.player.trackMute}}
-          />
-          <TrackList />
+          <div class="editor-layout">
+            <TrackList />
+            <PianoRoll
+              @song={{this.player.song}}
+              @player={{this.player.player}}
+              @trackMute={{this.player.trackMute}}
+            />
+          </div>
         {{/if}}
       {{else}}
         <div class="surface elevation-sm empty-state">

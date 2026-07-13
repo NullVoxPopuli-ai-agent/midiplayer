@@ -144,6 +144,21 @@
   cursor: pointer;
 }
 
+/* editor layout: track sidebar beside the piano roll */
+
+.editor-layout {
+  display: grid;
+  grid-template-columns: minmax(16rem, 20rem) 1fr;
+  gap: var(--gap-3, 1rem);
+  align-items: start;
+}
+
+@media (max-width: 60rem) {
+  .editor-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* track list */
 
 .track-list {
@@ -155,8 +170,10 @@
 
 .track-list__track {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--gap-2, 0.75rem);
+  gap: var(--gap-1, 0.5rem);
+  padding: var(--padding-1, 0.5rem);
 }
 
 .track-list__swatch {
@@ -167,7 +184,6 @@
 
 .track-list__name {
   font-weight: 600;
-  min-width: 10rem;
 }
 
 .track-list__meta {
@@ -179,6 +195,11 @@
   margin-left: auto;
   display: flex;
   gap: var(--gap-1, 0.5rem);
+}
+
+.track-list__items .track-list__track {
+  border: 1px solid color-mix(in srgb, var(--color-text, #888) 15%, transparent);
+  border-radius: var(--radius, 0.5rem);
 }
 
 .track-list__track--selected {
@@ -193,7 +214,6 @@
   color: inherit;
   font: inherit;
   font-weight: 600;
-  min-width: 10rem;
   text-align: left;
   cursor: pointer;
   padding: 0.25rem 0;
@@ -237,7 +257,7 @@
 }
 
 .track-list__instrument {
-  max-width: 12rem;
+  width: 100%;
   padding: 0.15rem 0.35rem;
   border-radius: var(--radius, 0.5rem);
 }
