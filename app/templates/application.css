@@ -1,3 +1,14 @@
+/* nvp.ui puts the theme class (and page background) on <body>, but
+   <html>'s background stays light — stretch body to the viewport so
+   the theme background always covers tall screens */
+html {
+  height: 100%;
+}
+
+body {
+  min-height: 100dvh;
+}
+
 .app-main {
   max-width: 96rem;
   margin: 0 auto;
@@ -120,8 +131,11 @@
 
 .piano-roll__viewport {
   position: relative;
-  height: min(60vh, 34rem);
+  /* fill tall screens, and the grip makes the height user-choosable */
+  height: clamp(22rem, 100dvh - 27rem, 70rem);
+  min-height: 16rem;
   overflow: auto;
+  resize: vertical;
   overscroll-behavior: contain;
   border-radius: var(--radius, 0.5rem);
 }
