@@ -10,6 +10,7 @@ import { Player } from "#app/midi/player.ts";
 import { songFromMidi } from "#app/midi/song.ts";
 import { TrackMute } from "#app/midi/track-mute.ts";
 import { serializeMidiEvent } from "#app/midi/web-midi-output.ts";
+import { keyLayout, noteName } from "#components/piano-roll-layout.ts";
 
 import type { SynthOutput } from "#app/midi/types.ts";
 import type { AnyEvent } from "midifile-ts";
@@ -210,5 +211,53 @@ module("Unit | midi | bug regressions", function () {
       song.playableTracks.map((track) => track.noteCount),
       [1, 1],
     );
+  });
+});
+
+module("Unit | piano-roll | key layout (fold)", function () {
+  test("unfolded shows all 128 keys, top row = highest pitch", function (assert) {
+    const layout = keyLayout([], false);
+
+    assert.strictEqual(layout.keys.length, 128);
+    assert.strictEqual(layout.keys[0], 127);
+    assert.strictEqual(layout.rowOf.get(127), 0);
+    assert.false(layout.folded);
+  });
+
+  test("folded shows only the edited track's used pitches, descending", function (assert) {
+    const song = createDemoSong();
+    const piano = song.playableTracks[0];
+    const layout = keyLayout(piano?.events, true);
+
+    assert.true(layout.folded);
+    assert.true(layout.keys.length < 20, "only used pitches remain");
+    assert.deepEqual(
+      Array.from(layout.keys),
+      Array.from(layout.keys).sort((a, b) => b - a),
+      "descending",
+    );
+    assert.true(
+      Array.from(layout.keys).every((key) =>
+        piano?.events.some(
+          (e) => e.type === "channel" && e.subtype === "note" && e.noteNumber === key,
+        ),
+      ),
+      "every visible row is actually used",
+    );
+  });
+
+  test("folding an empty track falls back to the full keyboard", function (assert) {
+    const layout = keyLayout([], true);
+
+    assert.strictEqual(layout.keys.length, 128);
+    assert.false(layout.folded, "reported as unfolded so labels behave normally");
+  });
+
+  test("noteName maps MIDI numbers", function (assert) {
+    assert.strictEqual(noteName(60), "C4");
+    assert.strictEqual(noteName(61), "C#4");
+    assert.strictEqual(noteName(69), "A4");
+    assert.strictEqual(noteName(0), "C-1");
+    assert.strictEqual(noteName(127), "G9");
   });
 });

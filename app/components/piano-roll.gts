@@ -11,6 +11,7 @@ import { beatsInRange } from "#app/midi/measure.ts";
 import { isNoteEvent } from "#app/midi/note-assembler.ts";
 import { preventDefault } from "#utils/prevent-default.ts";
 
+import { KEY_COUNT, keyLayout, noteName } from "./piano-roll-layout.ts";
 import { trackColor } from "./track-color.ts";
 
 import type { Player } from "#app/midi/player.ts";
@@ -24,8 +25,6 @@ import type HistoryService from "#services/history.ts";
 const RULER_HEIGHT = 26;
 const KEYS_WIDTH = 44;
 const PIXELS_PER_KEY = 8;
-const KEY_COUNT = 128;
-const CONTENT_HEIGHT = KEY_COUNT * PIXELS_PER_KEY;
 
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 16;
@@ -153,6 +152,18 @@ export class PianoRoll extends Component<PianoRollSignature> {
   private spacer: HTMLElement | null = null;
   private followedGeneration = -1;
   private lastPlayheadX = 0;
+  private hoveredKey: number | null = null;
+
+  /** Ableton-style fold: show only rows used by the edited track */
+  @tracked folded = false;
+
+  toggleFold = (): void => {
+    this.folded = !this.folded;
+  };
+
+  private get layout() {
+    return keyLayout(this.editor.selectedTrack?.events, this.folded);
+  }
   private rulerDrag: { startTick: number; dragged: boolean } | null = null;
   private noteDrag: NoteDrag | null = null;
   private rubber: Rubber | null = null;
@@ -222,6 +233,13 @@ export class PianoRoll extends Component<PianoRollSignature> {
 
   onScroll = (): void => {
     this.draw();
+  };
+
+  onPointerLeave = (): void => {
+    if (this.hoveredKey !== null) {
+      this.hoveredKey = null;
+      this.draw();
+    }
   };
 
   onContextMenu = (event: Event): void => {
@@ -513,8 +531,10 @@ export class PianoRoll extends Component<PianoRollSignature> {
   private keyAt(viewportY: number): number {
     const scrollTop = this.viewport?.scrollTop ?? 0;
     const row = Math.floor((scrollTop + viewportY - RULER_HEIGHT) / PIXELS_PER_KEY);
+    const { keys } = this.layout;
+    const clamped = Math.min(keys.length - 1, Math.max(0, row));
 
-    return Math.min(KEY_COUNT - 1, Math.max(0, KEY_COUNT - 1 - row));
+    return keys[clamped] ?? 0;
   }
 
   private hitTestNote(
@@ -551,6 +571,15 @@ export class PianoRoll extends Component<PianoRollSignature> {
     const canvas = this.canvas;
 
     if (!canvas) return;
+
+    // Ableton-style: hovering a row lights up its key on the piano
+    const inNoteArea = x >= KEYS_WIDTH && y >= RULER_HEIGHT && y < this.laneTop();
+    const hovered = inNoteArea ? this.keyAt(y) : null;
+
+    if (hovered !== this.hoveredKey) {
+      this.hoveredKey = hovered;
+      this.draw();
+    }
 
     if (y >= this.laneTop()) {
       canvas.style.cursor = "crosshair";
@@ -619,6 +648,7 @@ export class PianoRoll extends Component<PianoRollSignature> {
 
     void player.loop;
     void this.zoom;
+    void this.folded;
     void this.editor.selection;
     void this.editor.tool;
     void this.editor.selectedTrack;
@@ -653,7 +683,7 @@ export class PianoRoll extends Component<PianoRollSignature> {
     const width = Math.ceil(this.args.song.endOfSong * this.pixelsPerTick) + KEYS_WIDTH;
 
     this.spacer.style.width = `${width}px`;
-    this.spacer.style.height = `${CONTENT_HEIGHT + RULER_HEIGHT}px`;
+    this.spacer.style.height = `${this.layout.keys.length * PIXELS_PER_KEY + RULER_HEIGHT}px`;
   }
 
   private scrollToNotes(): void {
@@ -676,7 +706,9 @@ export class PianoRoll extends Component<PianoRollSignature> {
     const center = count ? sum / count : 60;
 
     viewport.scrollLeft = 0;
-    viewport.scrollTop = (KEY_COUNT - center) * PIXELS_PER_KEY - viewport.clientHeight / 2;
+    viewport.scrollTop = this.layout.folded
+      ? 0
+      : (KEY_COUNT - center) * PIXELS_PER_KEY - viewport.clientHeight / 2;
   }
 
   /**
@@ -733,9 +765,11 @@ export class PianoRoll extends Component<PianoRollSignature> {
     const startTick = Math.max(0, (scrollX - KEYS_WIDTH) / ppt);
     const endTick = (scrollX + width) / ppt;
 
+    const layout = this.layout;
     const xOf = (tick: number): number => tick * ppt - scrollX + KEYS_WIDTH;
+    // hidden (folded-away) keys map to NaN and are skipped by callers
     const yOf = (key: number): number =>
-      (KEY_COUNT - 1 - key) * PIXELS_PER_KEY - scrollY + RULER_HEIGHT;
+      (layout.rowOf.get(key) ?? Number.NaN) * PIXELS_PER_KEY - scrollY + RULER_HEIGHT;
 
     const laneTop = height - LANE_HEIGHT;
 
@@ -909,12 +943,12 @@ export class PianoRoll extends Component<PianoRollSignature> {
     ctx.globalAlpha = 0.07;
     ctx.fillStyle = theme.text;
 
-    for (let key = 0; key < KEY_COUNT; key++) {
+    for (const key of this.layout.keys) {
       if (!BLACK_KEYS.has(key % 12)) continue;
 
       const y = yOf(key);
 
-      if (y + PIXELS_PER_KEY < RULER_HEIGHT || y > height) continue;
+      if (Number.isNaN(y) || y + PIXELS_PER_KEY < RULER_HEIGHT || y > height) continue;
 
       ctx.fillRect(KEYS_WIDTH, y, width - KEYS_WIDTH, PIXELS_PER_KEY);
     }
@@ -953,7 +987,8 @@ export class PianoRoll extends Component<PianoRollSignature> {
         const x = xOf(event.tick);
         const y = yOf(event.noteNumber);
 
-        if (y + PIXELS_PER_KEY < RULER_HEIGHT || y > height) continue;
+        // NaN = pitch is folded away (ghost notes on hidden rows)
+        if (Number.isNaN(y) || y + PIXELS_PER_KEY < RULER_HEIGHT || y > height) continue;
 
         const noteHeight = PIXELS_PER_KEY - 1;
         const selected = isSelectedTrack && this.editor.selection.has(event.id);
@@ -986,27 +1021,20 @@ export class PianoRoll extends Component<PianoRollSignature> {
       }
     }
 
-    // rubber-band selection rectangle
+    // rubber-band selection rectangle (row-space: folded rows are not
+    // contiguous pitches)
     if (this.rubber) {
       const [minTick, maxTick] = order(this.rubber.startTick, this.rubber.endTick);
       const [minKey, maxKey] = order(this.rubber.startKey, this.rubber.endKey);
+      const topY = yOf(maxKey);
+      const bottomY = yOf(minKey) + PIXELS_PER_KEY;
 
       ctx.globalAlpha = 0.15;
       ctx.fillStyle = theme.primary;
-      ctx.fillRect(
-        xOf(minTick),
-        yOf(maxKey),
-        (maxTick - minTick) * ppt,
-        (maxKey - minKey + 1) * PIXELS_PER_KEY,
-      );
+      ctx.fillRect(xOf(minTick), topY, (maxTick - minTick) * ppt, bottomY - topY);
       ctx.globalAlpha = 0.7;
       ctx.strokeStyle = theme.primary;
-      ctx.strokeRect(
-        xOf(minTick),
-        yOf(maxKey),
-        (maxTick - minTick) * ppt,
-        (maxKey - minKey + 1) * PIXELS_PER_KEY,
-      );
+      ctx.strokeRect(xOf(minTick), topY, (maxTick - minTick) * ppt, bottomY - topY);
     }
 
     // playhead
@@ -1070,16 +1098,28 @@ export class PianoRoll extends Component<PianoRollSignature> {
     opts: { height: number; theme: Theme; yOf: (key: number) => number },
   ): void {
     const { height, theme, yOf } = opts;
+    const layout = this.layout;
 
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, RULER_HEIGHT, KEYS_WIDTH, height - RULER_HEIGHT);
     ctx.clip();
 
-    for (let key = 0; key < KEY_COUNT; key++) {
+    ctx.font = "9px system-ui, sans-serif";
+    ctx.textBaseline = "middle";
+
+    for (const key of layout.keys) {
       const y = yOf(key);
 
       if (y + PIXELS_PER_KEY < RULER_HEIGHT || y > height) continue;
+
+      const hovered = key === this.hoveredKey;
+
+      if (hovered) {
+        ctx.globalAlpha = 0.35;
+        ctx.fillStyle = theme.primary;
+        ctx.fillRect(0, y, KEYS_WIDTH, PIXELS_PER_KEY);
+      }
 
       if (BLACK_KEYS.has(key % 12)) {
         ctx.globalAlpha = 0.7;
@@ -1087,13 +1127,19 @@ export class PianoRoll extends Component<PianoRollSignature> {
         ctx.fillRect(0, y, KEYS_WIDTH * 0.6, PIXELS_PER_KEY);
       }
 
-      if (key % 12 === 0) {
-        ctx.globalAlpha = 0.7;
-        ctx.fillStyle = theme.text;
-        ctx.font = "9px system-ui, sans-serif";
-        ctx.textBaseline = "middle";
-        ctx.fillText(`C${key / 12 - 1}`, KEYS_WIDTH * 0.62, y + PIXELS_PER_KEY / 2);
+      // labels: every row when folded (rows are sparse), octave Cs
+      // otherwise — and always the hovered row's note name
+      const label = layout.folded || hovered || key % 12 === 0;
+
+      if (label) {
+        ctx.globalAlpha = hovered ? 1 : 0.7;
+        ctx.fillStyle = hovered ? theme.primary : theme.text;
+        ctx.fillText(noteName(key), KEYS_WIDTH * 0.62, y + PIXELS_PER_KEY / 2);
+      }
+
+      if (key % 12 === 0 && !layout.folded) {
         ctx.globalAlpha = 0.25;
+        ctx.fillStyle = theme.text;
         ctx.fillRect(0, y + PIXELS_PER_KEY - 1, KEYS_WIDTH, 1);
       }
     }
@@ -1117,6 +1163,10 @@ export class PianoRoll extends Component<PianoRollSignature> {
         >
           <span aria-hidden="true">⬚</span>
           <span class="sr-only">Selection tool</span>
+        </ToggleButton>
+
+        <ToggleButton @pressed={{this.folded}} @onClick={{this.toggleFold}}>
+          Fold
         </ToggleButton>
 
         <label class="piano-roll__quantize">
@@ -1182,6 +1232,7 @@ export class PianoRoll extends Component<PianoRollSignature> {
         {{on "pointerdown" this.onPointerDown}}
         {{on "pointermove" this.onPointerMove}}
         {{on "pointerup" this.onPointerUp}}
+        {{on "pointerleave" this.onPointerLeave}}
         {{on "contextmenu" this.onContextMenu}}
       >
         <div class="piano-roll__spacer"></div>
