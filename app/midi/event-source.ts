@@ -57,4 +57,8 @@ export class PlayerEventSource implements IEventSource {
   getCurrentStateEvents(tick: number): SendableEvent[] {
     return this.song.getCurrentStateEvents(tick);
   }
+
+  bpmAt(tick: number): number {
+    return this.song.bpmAt(tick);
+  }
 }

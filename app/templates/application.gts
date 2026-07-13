@@ -5,11 +5,18 @@ import "./application.css";
 import { PortalTargets } from "ember-primitives";
 import { Header, Shell, ThemeToggle } from "nvp.ui";
 
+import { FileMenu } from "#components/file-menu.gts";
+
 <template>
   <Shell>
     <PortalTargets />
     <Header>
-      <:left><strong>MIDI Player</strong></:left>
+      <:left>
+        <span class="header-left">
+          <strong>MIDI Player</strong>
+          <FileMenu />
+        </span>
+      </:left>
       <:right><ThemeToggle /></:right>
     </Header>
 

@@ -65,7 +65,7 @@ export class Player {
 
     this.scheduler?.seek(clamped);
     this._currentTick = clamped;
-    this._currentTempo = this.bpmAt(clamped);
+    this._currentTempo = this.eventSource.bpmAt(clamped);
 
     if (this._isPlaying) {
       this.allSoundsOff();
@@ -83,7 +83,7 @@ export class Player {
       this._currentTick = 0;
     }
 
-    this._currentTempo = this.bpmAt(this._currentTick);
+    this._currentTempo = this.eventSource.bpmAt(this._currentTick);
     this.sendCurrentStateEvents();
 
     this.scheduler = new EventScheduler<PlayerEvent>(
@@ -124,7 +124,7 @@ export class Player {
     this.resetControllers();
     this.stop();
     this._currentTick = 0;
-    this._currentTempo = this.bpmAt(0);
+    this._currentTempo = this.eventSource.bpmAt(0);
   }
 
   resetControllers(): void {
@@ -191,18 +191,6 @@ export class Player {
       value: 0,
       trackId: -1,
     }));
-  }
-
-  private bpmAt(tick: number): number {
-    let bpm = DEFAULT_TEMPO;
-
-    for (const event of this.eventSource.getEvents(0, tick + 1)) {
-      if (event.type === "meta" && event.subtype === "setTempo") {
-        bpm = bpmFromSetTempo(event.microsecondsPerBeat);
-      }
-    }
-
-    return bpm;
   }
 
   private sendCurrentStateEvents(): void {

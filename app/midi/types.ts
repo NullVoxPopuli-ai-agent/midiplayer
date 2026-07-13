@@ -52,4 +52,6 @@ export interface IEventSource {
   endOfSong: number;
   getEvents(startTick: number, endTick: number): PlayerEvent[];
   getCurrentStateEvents(tick: number): SendableEvent[];
+  /** tempo in effect at a tick (cheap — conductor-track walk only) */
+  bpmAt(tick: number): number;
 }

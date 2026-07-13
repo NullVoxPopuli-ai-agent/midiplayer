@@ -94,9 +94,22 @@ export class EventScheduler<E extends SchedulableEvent> {
 
     const loop = this.loop;
 
-    if (loop !== null && startTick < loop.end && endTick >= loop.end) {
-      const offset = endTick - loop.end;
-      const wrappedEnd = loop.begin + offset;
+    if (loop !== null && loop.end > loop.begin && startTick < loop.end && endTick >= loop.end) {
+      // a timer stall longer than the loop itself (background-tab
+      // throttling, GC pause) would push the wrapped window past
+      // loop.end, after which the wrap condition could never fire
+      // again — restart cleanly at loop.begin instead of replaying
+      // several loop iterations' worth of events at once
+      if (endTick - loop.end >= loop.end - loop.begin) {
+        this._currentTick = loop.begin;
+        this._scheduledTick = loop.begin;
+
+        return this.createLoopEndEvents().map((event) =>
+          withTimestamp(loop.begin)({ ...event, tick: loop.begin } as E),
+        );
+      }
+
+      const wrappedEnd = loop.begin + (endTick - loop.end);
       // possibly < loop.begin: crosses it exactly when the wall clock
       // crosses loop.end
       const currentTick = loop.begin - (loop.end - nowTick);

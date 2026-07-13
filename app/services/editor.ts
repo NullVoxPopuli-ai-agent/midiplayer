@@ -111,7 +111,13 @@ export default class EditorService extends Service {
     return event.id;
   }
 
-  /** live-move during a drag (no history push — the gesture pushed once) */
+  /**
+   * live-move during a drag (no history push — the gesture pushed once).
+   *
+   * The DELTA is snapped, not the absolute position: off-grid notes
+   * (recorded grooves, imported files) keep their offsets instead of
+   * being collapsed onto the grid — signal's quantized-delta drag.
+   */
   moveNotes(
     origin: readonly (NoteEvent & { id: number })[],
     deltaTick: number,
@@ -121,9 +127,11 @@ export default class EditorService extends Service {
 
     if (!track) return;
 
+    const snappedDelta = Math.round(deltaTick / this.snapTicks) * this.snapTicks;
+
     for (const note of origin) {
       track.updateEvent(note.id, {
-        tick: Math.max(0, this.snap(note.tick + deltaTick)),
+        tick: Math.max(0, note.tick + snappedDelta),
         noteNumber: Math.min(127, Math.max(0, note.noteNumber + deltaKey)),
       });
     }
@@ -134,10 +142,10 @@ export default class EditorService extends Service {
 
     if (!track) return;
 
-    const snapped = this.snap(origin.tick + origin.duration + deltaTick) - origin.tick;
+    const snappedDelta = Math.round(deltaTick / this.snapTicks) * this.snapTicks;
 
     track.updateEvent(origin.id, {
-      duration: Math.max(this.snapTicks / 4, snapped),
+      duration: Math.max(this.snapTicks / 4, origin.duration + snappedDelta),
     });
   }
 
@@ -300,7 +308,8 @@ export default class EditorService extends Service {
     this.recordingStatus = null;
   }
 
-  private handleMidiMessage(data: Uint8Array | null): void {
+  /** public for tests: raw Web MIDI bytes → recorded track events */
+  handleMidiMessage(data: Uint8Array | null): void {
     const track = this.selectedTrack;
 
     if (!data || data.length === 0 || !track || track.channel === undefined) return;
@@ -315,6 +324,21 @@ export default class EditorService extends Service {
     switch (kind) {
       case 0x90:
         if (d2 > 0) {
+          // a retriggered pitch closes the still-held first press —
+          // otherwise it would be silently lost when overwritten
+          const held = this.liveNotes.get(String(d1));
+
+          if (held) {
+            track.addEvent({
+              type: "channel",
+              subtype: "note",
+              tick: held.startTick,
+              noteNumber: d1,
+              velocity: held.velocity,
+              duration: Math.max(1, position - held.startTick),
+            });
+          }
+
           this.liveNotes.set(String(d1), { velocity: d2, startTick: position });
           this.player.sendLiveEvent({
             type: "channel",

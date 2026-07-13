@@ -469,7 +469,33 @@ export function songFromMidi(data: ArrayBuffer | Uint8Array): Song {
       tickedTracks = [{ channel: undefined, events: conductorEvents }];
 
       for (const events of normal) {
-        tickedTracks.push({ channel: channelOf(events), events });
+        // a track's channel events may span several channels; forcing
+        // them onto one track would silently rechannel them (the model
+        // is one-channel-per-track), so split multi-channel tracks —
+        // meta events (names etc.) stay with the first split
+        const channels = new Set<number>();
+
+        for (const event of events) {
+          if (event.type === "channel") channels.add(event.channel);
+        }
+
+        if (channels.size <= 1) {
+          tickedTracks.push({ channel: channelOf(events), events });
+          continue;
+        }
+
+        let first = true;
+
+        for (const channel of Array.from(channels).sort((a, b) => a - b)) {
+          const subset = events.filter(
+            (event) =>
+              (event.type === "channel" && event.channel === channel) ||
+              (first && event.type !== "channel"),
+          );
+
+          tickedTracks.push({ channel, events: subset });
+          first = false;
+        }
       }
 
       break;

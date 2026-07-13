@@ -35,10 +35,18 @@ export default class PlayerService extends Service {
   @tracked soundFontStatus: SoundFontStatus = "idle";
   @tracked soundFontProgress = 0; // 0..1
   @tracked error: string | null = null;
+  /** last song-load failure, shown in the status strip */
+  @tracked loadError: string | null = null;
 
   @tracked volume = 1;
 
   @tracked lastFile: StoredFile | null = null;
+
+  /**
+   * Bumped when the USER loads a song (not on undo/redo restores) —
+   * lets the piano roll reset its scroll only for genuinely new songs.
+   */
+  @tracked songGeneration = 0;
 
   /** "synth" or a Web MIDI output id */
   @tracked selectedOutputId: string = SYNTH_OUTPUT_ID;
@@ -104,7 +112,9 @@ export default class PlayerService extends Service {
     this.eventSource = new PlayerEventSource(song);
     this.eventSource.enableMetronome = metronome;
     this.player = new Player(this.groupOutput, this.eventSource);
-    this.player.loop = loop;
+    // the restored song may have shrunk past the loop (e.g. undoing a
+    // paste at the end) — a loop beyond endOfSong would never wrap
+    this.player.loop = loop && loop.end <= song.endOfSong ? loop : null;
     this.player.position = Math.min(position, song.endOfSong);
 
     if (wasPlaying) this.player.play();
@@ -173,6 +183,30 @@ export default class PlayerService extends Service {
     }
   }
 
+  // -- mute / solo ----------------------------------------------------
+
+  /**
+   * Mute/solo toggles flush sounding notes: GroupOutput drops a muted
+   * track's events at send time — including pending noteOffs — so
+   * without this, notes ring forever (signal flushes on mute changes
+   * too).
+   */
+  toggleMute(trackId: number): void {
+    this.trackMute.toggleMute(trackId);
+    this.flushIfPlaying();
+  }
+
+  toggleSolo(trackId: number): void {
+    this.trackMute.toggleSolo(trackId);
+    this.flushIfPlaying();
+  }
+
+  private flushIfPlaying(): void {
+    if (this.player?.isPlaying) {
+      this.player.allSoundsOff();
+    }
+  }
+
   // -- metronome ----------------------------------------------------
 
   get metronomeEnabled(): boolean {
@@ -236,6 +270,10 @@ export default class PlayerService extends Service {
   // -- internals ----------------------------------------------------
 
   private applyOutputSelection(): void {
+    // silence the OLD output before swapping, or its held notes stick
+    // (especially external MIDI hardware nothing will address again)
+    this.player?.allSoundsOff();
+
     if (this.selectedOutputId === SYNTH_OUTPUT_ID) {
       this.groupOutput.outputs = this.mainSynth ? [this.mainSynth] : [];
 
@@ -245,13 +283,19 @@ export default class PlayerService extends Service {
     const port = this.midiOutputs.find((output) => output.id === this.selectedOutputId);
 
     if (port) {
-      this.player?.allSoundsOff();
       this.groupOutput.outputs = [new WebMidiOutput(port)];
     }
   }
 
   private async useSong(song: Song, name: string): Promise<void> {
     this.error = null;
+
+    // a pending autosave of the PREVIOUS song must not fire after the
+    // new one loads — it would overwrite the Resume slot
+    if (this.autosaveTimer !== null) {
+      clearTimeout(this.autosaveTimer);
+      this.autosaveTimer = null;
+    }
 
     try {
       await this.ensureSynth();
@@ -269,6 +313,7 @@ export default class PlayerService extends Service {
 
     this.song = song;
     this.fileName = name;
+    this.songGeneration++;
     this.eventSource = new PlayerEventSource(song);
     this.player = new Player(this.groupOutput, this.eventSource);
   }

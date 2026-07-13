@@ -90,6 +90,13 @@ export class TrackList extends Component {
     this.editor.setProgram(track.id, Number((event.target as HTMLSelectElement).value));
   };
 
+  // the flag resets on pointerdown/pointerup as well as change: a
+  // drag that ends on its starting value fires no `change`, and a
+  // wedged flag would let later gestures mutate without a history push
+  onSliderStart = (): void => {
+    this.sliding = false;
+  };
+
   onSlider = (track: Track, controllerType: number, event: Event): void => {
     if (!this.sliding) {
       this.history.push();
@@ -108,11 +115,11 @@ export class TrackList extends Component {
   };
 
   toggleMute = (track: Track): void => {
-    this.player.trackMute.toggleMute(track.id);
+    this.player.toggleMute(track.id);
   };
 
   toggleSolo = (track: Track): void => {
-    this.player.trackMute.toggleSolo(track.id);
+    this.player.toggleSolo(track.id);
   };
 
   get isLastTrack(): boolean {
@@ -182,7 +189,9 @@ export class TrackList extends Component {
                 max="127"
                 value={{volumeOf track}}
                 aria-label="Volume for {{trackLabel track}}"
+                {{on "pointerdown" this.onSliderStart}}
                 {{on "input" (fn this.onSlider track 7)}}
+                {{on "pointerup" this.onSliderDone}}
                 {{on "change" this.onSliderDone}}
               />
             </label>
@@ -194,7 +203,9 @@ export class TrackList extends Component {
                 max="127"
                 value={{panOf track}}
                 aria-label="Pan for {{trackLabel track}}"
+                {{on "pointerdown" this.onSliderStart}}
                 {{on "input" (fn this.onSlider track 10)}}
+                {{on "pointerup" this.onSliderDone}}
                 {{on "change" this.onSliderDone}}
               />
             </label>

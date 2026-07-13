@@ -10,8 +10,7 @@ body {
 }
 
 .app-main {
-  max-width: 96rem;
-  margin: 0 auto;
+  width: 100%;
   padding: var(--padding-3, 1rem);
 }
 
@@ -23,6 +22,18 @@ body {
 .surface {
   padding: var(--padding-3, 1rem);
   border-radius: var(--radius, 0.5rem);
+}
+
+/* header */
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-3, 1rem);
+}
+
+.file-menu {
+  display: inline-flex;
 }
 
 /* file picker */
@@ -44,6 +55,31 @@ body {
 
 .picker__status--error {
   color: var(--color-danger, #c33);
+}
+
+.empty-state {
+  display: grid;
+  gap: var(--gap-3, 1rem);
+  max-width: 46rem;
+  margin: 8vh auto 0;
+  text-align: center;
+  justify-items: center;
+}
+
+.empty-state__title {
+  margin: 0;
+}
+
+.empty-state__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-2, 0.75rem);
+  justify-content: center;
+}
+
+.empty-state__hints {
+  opacity: 0.65;
+  font-size: 0.9rem;
 }
 
 .empty-state a {

@@ -33,6 +33,8 @@ const ZOOM_STEP = 1.25;
 
 const RESIZE_HANDLE_PX = 6;
 const LANE_HEIGHT = 110;
+/** drawable value range inside the lane (the top 14px hold the label) */
+const LANE_USABLE_HEIGHT = LANE_HEIGHT - 14;
 
 const BLACK_KEYS = new Set([1, 3, 6, 8, 10]);
 
@@ -98,10 +100,16 @@ function themeOf(element: HTMLElement): Theme {
 
 interface NoteDrag {
   kind: "move" | "resize";
+  /** the note under the pointer at gesture start */
+  noteId: number;
   originNotes: IdNote[];
   startTick: number;
   startKey: number;
   moved: boolean;
+  /** history checkpoint taken (lazily, on first real movement) */
+  pushed: boolean;
+  /** gesture began by creating this note (click-release keeps it) */
+  created: boolean;
 }
 
 interface Rubber {
@@ -143,7 +151,8 @@ export class PianoRoll extends Component<PianoRollSignature> {
   private viewport: HTMLElement | null = null;
   private canvas: HTMLCanvasElement | null = null;
   private spacer: HTMLElement | null = null;
-  private followedSong: Song | null = null;
+  private followedGeneration = -1;
+  private lastPlayheadX = 0;
   private rulerDrag: { startTick: number; dragged: boolean } | null = null;
   private noteDrag: NoteDrag | null = null;
   private rubber: Rubber | null = null;
@@ -270,18 +279,21 @@ export class PianoRoll extends Component<PianoRollSignature> {
     this.capturePointer(event);
 
     if (hit) {
-      // drag an existing note (both tools)
+      // drag an existing note (both tools); the history checkpoint is
+      // taken lazily on first movement so a plain click stays cheap
       if (!this.editor.selection.has(hit.note.id)) {
         this.editor.setSelection([hit.note.id]);
       }
 
-      this.history.push();
       this.noteDrag = {
         kind: hit.onEdge ? "resize" : "move",
+        noteId: hit.note.id,
         originNotes: this.editor.selectedNotes.map((note) => ({ ...note })),
         startTick: tick,
         startKey: key,
         moved: false,
+        pushed: false,
+        created: false,
       };
 
       return;
@@ -294,13 +306,17 @@ export class PianoRoll extends Component<PianoRollSignature> {
         const created = this.editor.selectedNotes.find((note) => note.id === id);
 
         if (created) {
-          // keep dragging to set the note length
+          // keep dragging to set the note length (createNote already
+          // took the history checkpoint)
           this.noteDrag = {
             kind: "resize",
+            noteId: id,
             originNotes: [{ ...created }],
             startTick: tick,
             startKey: key,
             moved: false,
+            pushed: true,
+            created: true,
           };
         }
       }
@@ -340,7 +356,16 @@ export class PianoRoll extends Component<PianoRollSignature> {
       const deltaTick = this.tickAt(x) - drag.startTick;
       const deltaKey = this.keyAt(y) - drag.startKey;
 
-      drag.moved ||= Math.abs(deltaTick) > 0 || deltaKey !== 0;
+      // a gesture becomes a drag once it crosses a small threshold —
+      // below that, release means "click" (pencil: delete the note)
+      drag.moved ||= Math.abs(deltaTick) > this.editor.snapTicks / 4 || deltaKey !== 0;
+
+      if (!drag.moved) return;
+
+      if (!drag.pushed) {
+        this.history.push();
+        drag.pushed = true;
+      }
 
       if (drag.kind === "move") {
         this.editor.moveNotes(drag.originNotes, deltaTick, deltaKey);
@@ -366,6 +391,7 @@ export class PianoRoll extends Component<PianoRollSignature> {
 
   onPointerUp = (event: PointerEvent): void => {
     const rulerDrag = this.rulerDrag;
+    const noteDrag = this.noteDrag;
     const rubber = this.rubber;
 
     this.rulerDrag = null;
@@ -377,6 +403,14 @@ export class PianoRoll extends Component<PianoRollSignature> {
       if (!rulerDrag.dragged) {
         this.args.player.position = rulerDrag.startTick;
       }
+
+      return;
+    }
+
+    // pencil: a plain click on an existing note removes it (signal's
+    // eraser-on-click behavior); a click on a just-created note keeps it
+    if (noteDrag && !noteDrag.moved && !noteDrag.created && this.editor.tool === "pencil") {
+      this.editor.deleteNote(noteDrag.noteId);
 
       return;
     }
@@ -416,9 +450,11 @@ export class PianoRoll extends Component<PianoRollSignature> {
   }
 
   private laneValueAt(y: number): number {
+    // must invert drawLane's yFor exactly, or clicking a drawn point
+    // rewrites it to a different value and repeated edits drift
     const fraction = Math.min(
       1,
-      Math.max(0, ((this.viewport?.clientHeight ?? 0) - y) / LANE_HEIGHT),
+      Math.max(0, ((this.viewport?.clientHeight ?? 0) - y) / LANE_USABLE_HEIGHT),
     );
     const { lane, max } = this.laneChoice;
 
@@ -499,8 +535,11 @@ export class PianoRoll extends Component<PianoRollSignature> {
       if (tick < note.tick || tick > note.tick + note.duration) continue;
 
       const endX = (note.tick + note.duration) * this.pixelsPerTick;
+      const noteWidth = note.duration * this.pixelsPerTick;
       const scrolledX = (this.viewport?.scrollLeft ?? 0) + viewportX - KEYS_WIDTH;
-      const onEdge = endX - scrolledX <= RESIZE_HANDLE_PX;
+      // notes narrower than the handle would otherwise be all-edge
+      // and could never be moved
+      const onEdge = noteWidth > RESIZE_HANDLE_PX && endX - scrolledX <= RESIZE_HANDLE_PX;
 
       return { note, onEdge };
     }
@@ -593,8 +632,12 @@ export class PianoRoll extends Component<PianoRollSignature> {
 
     this.syncSpacer();
 
-    if (song !== this.followedSong) {
-      this.followedSong = song;
+    // songGeneration only bumps on USER loads — undo/redo swaps the
+    // Song object but must not yank the scroll position around
+    const generation = this.editor.player.songGeneration;
+
+    if (generation !== this.followedGeneration) {
+      this.followedGeneration = generation;
       this.editor.clearSelection();
       this.scrollToNotes();
     }
@@ -636,6 +679,11 @@ export class PianoRoll extends Component<PianoRollSignature> {
     viewport.scrollTop = (KEY_COUNT - center) * PIXELS_PER_KEY - viewport.clientHeight / 2;
   }
 
+  /**
+   * Follow only when the playhead CROSSES out of view — if the user
+   * scrolled elsewhere (playhead already offscreen), leave them alone
+   * instead of snapping back every position tick.
+   */
   private followPlayhead(position: number): void {
     const viewport = this.viewport;
 
@@ -644,10 +692,14 @@ export class PianoRoll extends Component<PianoRollSignature> {
     const playheadX = position * this.pixelsPerTick;
     const viewWidth = viewport.clientWidth - KEYS_WIDTH;
     const left = viewport.scrollLeft;
+    const right = left + viewWidth * 0.9;
+    const wasVisible = this.lastPlayheadX >= left && this.lastPlayheadX <= right;
 
-    if (playheadX < left || playheadX > left + viewWidth * 0.9) {
+    if (wasVisible && (playheadX < left || playheadX > right)) {
       viewport.scrollLeft = Math.max(0, playheadX - viewWidth * 0.1);
     }
+
+    this.lastPlayheadX = playheadX;
   }
 
   // -- drawing -------------------------------------------------------
@@ -750,7 +802,7 @@ export class PianoRoll extends Component<PianoRollSignature> {
     }
 
     const yFor = (fraction: number): number =>
-      height - Math.min(1, Math.max(0, fraction)) * (LANE_HEIGHT - 14);
+      height - Math.min(1, Math.max(0, fraction)) * LANE_USABLE_HEIGHT;
 
     if (choice.lane.kind === "velocity") {
       ctx.fillStyle = trackColor(track.id);

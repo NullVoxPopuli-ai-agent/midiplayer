@@ -4,7 +4,7 @@ import { on } from "@ember/modifier";
 import { service } from "@ember/service";
 
 import { modifier } from "ember-modifier";
-import { Menu } from "nvp.ui/menu";
+import { Button } from "nvp.ui";
 
 import { preventDefault } from "#utils/prevent-default.ts";
 
@@ -30,7 +30,6 @@ export class MidiPlayer extends Component {
   @service declare editor: EditorService;
   @service declare history: HistoryService;
 
-  @tracked loadError: string | null = null;
   @tracked isDragOver = false;
 
   private fileInput: HTMLInputElement | null = null;
@@ -45,33 +44,18 @@ export class MidiPlayer extends Component {
     this.fileInput?.click();
   };
 
-  newSong = (): void => {
-    void this.load(this.player.newSong());
-  };
-
-  exportMidi = (): void => {
-    this.player.exportMidi();
-  };
-
   onFile = (event: Event): void => {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
 
     if (!file) return;
 
-    // allow re-selecting the same file later
     input.value = "";
-
     void this.load(this.player.loadFile(file));
   };
 
-  loadDemo = (): void => {
-    void this.load(this.player.loadDemoSong());
-  };
-
-  loadLast = (): void => {
-    void this.load(this.player.loadLastSong());
-  };
+  loadDemo = (): void => void this.load(this.player.loadDemoSong());
+  loadLast = (): void => void this.load(this.player.loadLastSong());
 
   /**
    * Window-level handlers: drop a .mid anywhere to load it, space to
@@ -98,7 +82,7 @@ export class MidiPlayer extends Component {
       if (file) {
         void this.load(this.player.loadFile(file));
       } else if (event.dataTransfer?.files.length) {
-        this.loadError = "That doesn't look like a .mid file";
+        this.player.loadError = "That doesn't look like a .mid file";
       }
     };
 
@@ -188,14 +172,14 @@ export class MidiPlayer extends Component {
   });
 
   private async load(promise: Promise<void>): Promise<void> {
-    this.loadError = null;
+    this.player.loadError = null;
     this.history.clear();
     this.editor.clearSelection();
 
     try {
       await promise;
     } catch (error) {
-      this.loadError = error instanceof Error ? error.message : String(error);
+      this.player.loadError = error instanceof Error ? error.message : String(error);
     }
   }
 
@@ -203,55 +187,34 @@ export class MidiPlayer extends Component {
     return `${Math.round(this.player.soundFontProgress * 100)}%`;
   }
 
+  get showStatusStrip(): boolean {
+    return Boolean(
+      this.player.fileName || this.player.soundFontStatus === "loading" || this.player.loadError,
+    );
+  }
+
   <template>
     <div {{this.globalHandlers}} class="midi-player">
-      <form class="surface elevation-md picker" {{on "submit" preventDefault}}>
-        {{! signal's File menu, via nvp.ui Menu }}
-        <Menu @variant="primary" as |m|>
-          <m.Trigger>File</m.Trigger>
-          <m.Content as |c|>
-            <c.Item @onSelect={{this.newSong}}>New song</c.Item>
-            <c.Item @onSelect={{this.openFilePicker}}>Open .mid file…</c.Item>
-            {{#if this.player.lastFile}}
-              <c.Item @onSelect={{this.loadLast}}>
-                Resume
-                {{this.player.lastFile.name}}
-              </c.Item>
-            {{/if}}
-            {{#if this.player.song}}
-              <c.Item @onSelect={{this.exportMidi}}>Export .mid</c.Item>
-            {{/if}}
-            <c.Separator />
-            <c.Item @onSelect={{this.loadDemo}}>Play the demo song</c.Item>
-          </m.Content>
-        </Menu>
+      {{#if this.showStatusStrip}}
+        <div class="surface elevation-md picker">
+          {{#if this.player.fileName}}
+            <span class="picker__file-name">{{this.player.fileName}}</span>
+          {{/if}}
 
-        <input
-          type="file"
-          accept=".mid,.midi,audio/midi,audio/x-midi"
-          hidden
-          aria-label="Open a MIDI file"
-          {{this.registerFileInput}}
-          {{on "change" this.onFile}}
-        />
+          {{#if (eq this.player.soundFontStatus "loading")}}
+            <span class="picker__status" role="status">
+              Downloading soundfont (A320U, ~9.7 MB)…
+              {{this.soundFontPercent}}
+            </span>
+          {{/if}}
 
-        {{#if this.player.fileName}}
-          <span class="picker__file-name">{{this.player.fileName}}</span>
-        {{/if}}
-
-        {{#if (eq this.player.soundFontStatus "loading")}}
-          <span class="picker__status" role="status">
-            Downloading soundfont (A320U, ~9.7 MB)…
-            {{this.soundFontPercent}}
-          </span>
-        {{/if}}
-
-        {{#if this.loadError}}
-          <span class="picker__status picker__status--error" role="alert">
-            {{this.loadError}}
-          </span>
-        {{/if}}
-      </form>
+          {{#if this.player.loadError}}
+            <span class="picker__status picker__status--error" role="alert">
+              {{this.player.loadError}}
+            </span>
+          {{/if}}
+        </div>
+      {{/if}}
 
       {{#if this.player.song}}
         {{#if this.player.player}}
@@ -267,17 +230,44 @@ export class MidiPlayer extends Component {
           </div>
         {{/if}}
       {{else}}
-        <div class="surface elevation-sm empty-state">
+        <form class="surface elevation-md empty-state" {{on "submit" preventDefault}}>
+          <h2 class="empty-state__title">Play &amp; edit MIDI, right in your browser</h2>
           <p>
-            Load a Standard MIDI File — open it, or drop it anywhere on this window — and it will
-            play in your browser through the same soundfont synth engine as
-            <a href="https://github.com/ryohey/signal">ryohey/signal</a>.
+            A port of
+            <a href="https://github.com/ryohey/signal">ryohey/signal</a>
+            to Ember: soundfont synth playback, a piano-roll editor with undo, control curves, a
+            metronome, loops, and MIDI recording. Nothing is uploaded anywhere — parsing,
+            scheduling, and synthesis all happen locally.
           </p>
-          <p>
-            Nothing is uploaded anywhere: parsing, scheduling, and synthesis all happen locally.
-            Space plays/pauses; Home rewinds.
+
+          <div class="empty-state__actions">
+            <Button @variant="primary" @onClick={{this.loadDemo}}>
+              <:start>▶</:start>
+              <:text>Play the demo song</:text>
+            </Button>
+            <Button @onClick={{this.openFilePicker}}>Open a .mid file…</Button>
+            {{#if this.player.lastFile}}
+              <Button @variant="secondary" @onClick={{this.loadLast}}>
+                <:start>↻</:start>
+                <:text>Resume {{this.player.lastFile.name}}</:text>
+              </Button>
+            {{/if}}
+          </div>
+
+          <input
+            type="file"
+            accept=".mid,.midi,audio/midi,audio/x-midi"
+            hidden
+            aria-label="Open a MIDI file"
+            {{this.registerFileInput}}
+            {{on "change" this.onFile}}
+          />
+
+          <p class="empty-state__hints">
+            …or just drop a .mid file anywhere on this window. Space plays/pauses · Home rewinds ·
+            the first play downloads a ~9.7 MB GM soundfont (cached after that).
           </p>
-        </div>
+        </form>
       {{/if}}
 
       {{#if this.isDragOver}}

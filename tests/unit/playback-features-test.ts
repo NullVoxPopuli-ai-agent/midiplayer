@@ -1,9 +1,18 @@
 import { module, test } from "qunit";
 
+import { write } from "midifile-ts";
+
 import { createDemoSong } from "#app/midi/demo-song.ts";
 import { METRONOME_TRACK_ID, PlayerEventSource } from "#app/midi/event-source.ts";
+import { GroupOutput } from "#app/midi/group-output.ts";
 import { beatsInRange, measuresFromTimeSignatures } from "#app/midi/measure.ts";
+import { Player } from "#app/midi/player.ts";
+import { songFromMidi } from "#app/midi/song.ts";
+import { TrackMute } from "#app/midi/track-mute.ts";
 import { serializeMidiEvent } from "#app/midi/web-midi-output.ts";
+
+import type { SynthOutput } from "#app/midi/types.ts";
+import type { AnyEvent } from "midifile-ts";
 
 const TIMEBASE = 480;
 
@@ -107,5 +116,99 @@ module("Unit | midi | wall-clock time", function () {
     assert.strictEqual(song.secondsAt(TIMEBASE * 4), 2);
     // full 8 bars = 16s
     assert.strictEqual(song.secondsAt(TIMEBASE * 32), 16);
+  });
+});
+
+module("Unit | midi | bug regressions", function () {
+  test("mute toggle during playback flushes sounding notes", function (assert) {
+    const sent: number[] = [];
+    const output = {
+      activate() {
+        // silent
+      },
+      sendEvent(event: Parameters<SynthOutput["sendEvent"]>[0]) {
+        if (event.type === "channel" && event.subtype === "controller") {
+          sent.push(event.controllerType);
+        }
+      },
+    };
+    const song = createDemoSong();
+    const trackMute = new TrackMute();
+    const group = new GroupOutput(trackMute);
+
+    group.outputs = [output];
+
+    const player = new Player(group, new PlayerEventSource(song));
+
+    player.play();
+    sent.length = 0;
+
+    trackMute.toggleMute(1);
+    player.allSoundsOff(); // what PlayerService.toggleMute does while playing
+
+    player.stop();
+
+    assert.true(sent.includes(120), "all-sounds-off (CC 120) reached the output");
+  });
+
+  test("player tempo comes from the conductor walk, not a full event scan", function (assert) {
+    const song = createDemoSong();
+    const source = new PlayerEventSource(song);
+
+    assert.strictEqual(source.bpmAt(0), song.bpmAt(0));
+    assert.strictEqual(source.bpmAt(9999), song.bpmAt(9999));
+  });
+
+  test("format-1 multi-channel tracks are split instead of rechanneled", function (assert) {
+    const conductor: AnyEvent[] = [
+      { type: "meta", subtype: "setTempo", microsecondsPerBeat: 500_000, deltaTime: 0 },
+      { type: "meta", subtype: "endOfTrack", deltaTime: 0 },
+    ];
+    const mixed: AnyEvent[] = [
+      {
+        type: "channel",
+        subtype: "noteOn",
+        channel: 3,
+        noteNumber: 60,
+        velocity: 100,
+        deltaTime: 0,
+      },
+      {
+        type: "channel",
+        subtype: "noteOff",
+        channel: 3,
+        noteNumber: 60,
+        velocity: 0,
+        deltaTime: 240,
+      },
+      {
+        type: "channel",
+        subtype: "noteOn",
+        channel: 4,
+        noteNumber: 62,
+        velocity: 100,
+        deltaTime: 0,
+      },
+      {
+        type: "channel",
+        subtype: "noteOff",
+        channel: 4,
+        noteNumber: 62,
+        velocity: 0,
+        deltaTime: 240,
+      },
+      { type: "meta", subtype: "endOfTrack", deltaTime: 0 },
+    ];
+    const song = songFromMidi(write([conductor, mixed], 480));
+
+    assert.deepEqual(
+      song.playableTracks.map((track) => track.channel),
+      [3, 4],
+      "one track per channel",
+    );
+    assert.deepEqual(
+      song.playableTracks.map((track) => track.noteCount),
+      [1, 1],
+    );
   });
 });

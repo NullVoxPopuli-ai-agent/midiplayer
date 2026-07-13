@@ -145,3 +145,33 @@ module("Unit | midi | event-scheduler | loop", function () {
     );
   });
 });
+
+module("Unit | midi | event-scheduler | stall resilience", function () {
+  test("a stall longer than the loop restarts at loop.begin instead of killing the loop", function (assert) {
+    const events = [{ tick: 100 }, { tick: 500 }];
+    const scheduler = schedulerFor(events, 900);
+
+    scheduler.loop = { begin: 0, end: 960 };
+
+    scheduler.readNextEvents(120, 1000);
+
+    // 60s stall: the window is dozens of loop lengths long
+    const result = scheduler.readNextEvents(120, 61000);
+
+    assert.deepEqual(
+      result.map((r) => r.event.tick),
+      [0],
+      "only the loop-end (all-notes-off) events fire on the restart read",
+    );
+    assert.strictEqual(scheduler.scheduledTick, 0, "restarted at loop.begin");
+
+    // the loop is still alive: the next normal read plays from the top
+    const next = scheduler.readNextEvents(120, 61050);
+
+    assert.deepEqual(
+      next.map((r) => r.event.tick),
+      [100],
+      "playback continues inside the loop",
+    );
+  });
+});
